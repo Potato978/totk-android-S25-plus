@@ -85,11 +85,6 @@ static inline int totk_s25_profile_apply_for(const char *soc, const char *model)
     count += totk_s25_set_default("TOTK_ADPF_LOAD_HINT", "1", applied, sizeof applied, &used);
     count += totk_s25_set_default("TOTK_ADPF_TARGET_PCT", "85", applied, sizeof applied, &used);
 
-    /* 2. Passive-cooling thermal headroom stepping (only active in FPS60/40 modes). */
-    if (fps60) {
-        count += totk_s25_set_default("TOTK_THERMAL_STEP", "1", applied, sizeof applied, &used);
-    }
-
     /* 3. Tight frame-pacing wakeups and priority for render/command-walking threads. */
     count += totk_s25_set_default("TOTK_TIMER_SLACK_NS", "1000", applied, sizeof applied, &used);
     count += totk_s25_set_default("TOTK_PRIO_RENDER", "-4", applied, sizeof applied, &used);

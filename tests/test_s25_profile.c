@@ -25,9 +25,8 @@ int main(void) {
     clear_all();
     setenv("TOTK_FPS60", "1", 1);
     int n = totk_s25_profile_apply_for("SM8750", "SM-S936U");
-    assert(n == 15);
+    assert(n == 14);
     assert(!strcmp(getenv("TOTK_ADPF"), "full"));
-    assert(!strcmp(getenv("TOTK_THERMAL_STEP"), "1"));
     assert(!strcmp(getenv("TOTK_VK_SPLIT_PASS_DRAWS"), "512"));
     assert(!strcmp(getenv("TOTK_SHADOW_CASCADES"), "3"));
     assert(!strcmp(getenv("TOTK_POINT_SHADOWS"), "2"));
