@@ -40,6 +40,7 @@
 #include "thread_sampler.h"
 #include "build_kind.h"
 #include "android_perf.h"
+#include "s25_profile.h"
 #include <android/api-level.h>
 #include <android/choreographer.h>
 #include <android/asset_manager.h>
@@ -1654,6 +1655,7 @@ static int start_game(const ANativeActivity *a) {
     /* The launcher menu's choices first, then the developer's totk.env, which overrides them (both replace). */
     snprintf(p, sizeof p, "%s/settings.env", a->internalDataPath); settings_file(p);
     snprintf(p, sizeof p, "%s/totk.env", g_data); env_file(p);
+    totk_s25_profile_apply();   /* S25+ / SM8750 defaults for unset knobs; settings.env & totk.env win */
     android_driver_env_policy(); /* freeze driver options before any app worker or driver call */
     gpu_profile_identity(a);
     log_mirror_start();   /* TOTK_LOGCAT is final now */
@@ -1753,6 +1755,8 @@ static int start_game(const ANativeActivity *a) {
 enum { SW_A = 0, SW_B, SW_X, SW_Y, SW_LS, SW_RS, SW_L, SW_R, SW_ZL, SW_ZR, SW_PLUS, SW_MINUS, SW_LEFT, SW_UP, SW_RIGHT, SW_DOWN };
 static pthread_mutex_t g_pad_mu = PTHREAD_MUTEX_INITIALIZER;
 static uint64_t g_keys, g_hat, g_trig, g_edges;   /* buttons from key events, from the hat axes, from trigger axes; presses since the last read */
+static uint64_t g_touch_keys, g_touch_edges;      /* on-screen customizable touch UI buttons */
+static float g_touch_axes[4];                     /* on-screen virtual analog sticks (lx, ly, rx, ry) */
 static int32_t g_axes[4];
 static int g_pad_seen;
 static overlay_chord g_chord;   /* Minus + R live overlay shortcut (overlay_chord.h); under g_pad_mu */
@@ -1857,10 +1861,33 @@ static int handle_input(AInputEvent *ev) {
     }
     return 0;
 }
+
+void runtime_android_touch_button(JNIEnv *env, jclass cls, jlong mask, jboolean down) {
+    (void)env; (void)cls;
+    uint64_t m = (uint64_t)mask;
+    pthread_mutex_lock(&g_pad_mu);
+    g_pad_seen = 1;
+    if (down) { g_touch_edges |= m & ~g_touch_keys; g_touch_keys |= m; }
+    else g_touch_keys &= ~m;
+    pthread_mutex_unlock(&g_pad_mu);
+}
+void runtime_android_touch_stick(JNIEnv *env, jclass cls, jint stick, jfloat x, jfloat y) {
+    (void)env; (void)cls;
+    if (stick != 0 && stick != 1) return;
+    if (x < -1.0f) x = -1.0f; else if (x > 1.0f) x = 1.0f;
+    if (y < -1.0f) y = -1.0f; else if (y > 1.0f) y = 1.0f;
+    pthread_mutex_lock(&g_pad_mu);
+    g_pad_seen = 1;
+    g_touch_axes[stick * 2] = x;
+    g_touch_axes[stick * 2 + 1] = y;
+    pthread_mutex_unlock(&g_pad_mu);
+}
+
 void runtime_gamepad_start(void) {}
 void runtime_gamepad_clear(void) {
     pthread_mutex_lock(&g_pad_mu);
-    g_keys = g_hat = g_trig = g_edges = 0; memset(g_axes, 0, sizeof g_axes); memset(&g_chord, 0, sizeof g_chord);
+    g_keys = g_hat = g_trig = g_edges = 0; g_touch_keys = g_touch_edges = 0;
+    memset(g_axes, 0, sizeof g_axes); memset(g_touch_axes, 0, sizeof g_touch_axes); memset(&g_chord, 0, sizeof g_chord);
     pthread_mutex_unlock(&g_pad_mu);
 }
 void runtime_gamepad_read(RuntimeGamepadState *out) {
@@ -1869,8 +1896,11 @@ void runtime_gamepad_read(RuntimeGamepadState *out) {
     chord_minus_locked(timed);
     if (timed && chord_log())   /* rare (once per lone Minus); the diagnostic accepts printing under the pad lock */
         fprintf(stderr, "[chord] pad read: %s\n", timed & OVERLAY_CHORD_MINUS_DOWN ? "deliver late: 150 ms passed without R" : "tap replay ends (minus released)");
-    out->buttons = g_keys | g_hat | g_trig | g_edges; g_edges = 0;   /* a press shorter than one read still reaches the game */
-    out->lx = g_axes[0]; out->ly = g_axes[1]; out->rx = g_axes[2]; out->ry = g_axes[3];
+    out->buttons = g_keys | g_hat | g_trig | g_edges | g_touch_keys | g_touch_edges; g_edges = 0; g_touch_edges = 0;
+    out->lx = g_touch_axes[0] != 0.0f ? g_touch_axes[0] : g_axes[0];
+    out->ly = g_touch_axes[1] != 0.0f ? g_touch_axes[1] : g_axes[1];
+    out->rx = g_touch_axes[2] != 0.0f ? g_touch_axes[2] : g_axes[2];
+    out->ry = g_touch_axes[3] != 0.0f ? g_touch_axes[3] : g_axes[3];
     out->connected = g_pad_seen;
     pthread_mutex_unlock(&g_pad_mu);
 }

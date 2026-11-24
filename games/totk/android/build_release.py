@@ -68,6 +68,7 @@ def parse_args(argv):
     ap.add_argument('--version-code', type=int, help='default: from the version name, MAJOR*10000 + MINOR*100 + PATCH')
     ap.add_argument('--version-name', help=f'default: {APP_VERSION}')
     ap.add_argument('--jobs', type=int, default=os.cpu_count() or 4)
+    ap.add_argument('--s25-opt', action='store_true', help='compile libtotk.so with -O3, ThinLTO, and Oryon v2 ARMv8.6-A flags')
     args = ap.parse_args(argv)
     if not args.audit:
         missing = [n for n in ('ndk', 'turnip', 'key') if not getattr(args, n)]
@@ -99,7 +100,7 @@ def load_helper(path, name):
 
 
 # ---- native libraries ----
-def build_native(work, ndk, logs, *, release, jobs, setup=True):
+def build_native(work, ndk, logs, *, release, jobs, setup=True, s25_opt=False):
     """libtotk.so and its companions for VERSION, plus (setup=True) the setup library and hactool. Returns the library
     paths in packing order. Nothing here reads game files: the runtime takes its game data at start."""
     import build_android as dev
@@ -110,7 +111,7 @@ def build_native(work, ndk, logs, *, release, jobs, setup=True):
     dev.fetch(*dev.VPX_SRC, work / 'src/libvpx', logs / 'fetch-libvpx.log')
     out = work / f'native-{"release" if release else "dev"}'
     make = ['make', '-C', HERE, 'TARGET=android', 'APP=1', f'NDK={ndk}', f'API={API}', f'VERSION={VERSION}', f'OUT={out}',
-            f'OPUS={opus}', f'VPX={vpx}', 'GPU=vk', f'DEV_BUILD={0 if release else 1}', f'PYTHON={sys.executable}', f'-j{jobs}', 'all']
+            f'OPUS={opus}', f'VPX={vpx}', 'GPU=vk', f'DEV_BUILD={0 if release else 1}', f'S25_OPT={1 if s25_opt else 0}', f'PYTHON={sys.executable}', f'-j{jobs}', 'all']
     if setup:
         hactool = load_helper(HERE / 'setup/hactool/deps.py', 'hactool_deps').prepare_hactool(work, logs / 'fetch-hactool-setup.log')
         capstone = load_helper(HERE / 'setup/rewrite/deps.py', 'capstone_deps').prepare_capstone(

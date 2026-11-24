@@ -216,6 +216,8 @@ __attribute__((visibility("default"))) jint JNI_OnLoad(JavaVM *vm, void *reserve
             {"nativeMotion", "(FFFFFF)V", (void *)runtime_android_motion},
             {"nativeMotionLive", "(ZLjava/lang/String;)V", (void *)runtime_android_motion_live},
             {"nativeFeedbackEnabled", "()I", (void *)runtime_android_feedback_enabled},
+            {"nativeTouchButton", "(JZ)V", (void *)runtime_android_touch_button},
+            {"nativeTouchStick", "(IFF)V", (void *)runtime_android_touch_stick},
         };
         if ((*env)->RegisterNatives(env,cls,present_methods,sizeof present_methods/sizeof *present_methods)) {
             (*env)->ExceptionClear(env); fprintf(stderr,"[present-prerotate] RegisterNatives failed\n");

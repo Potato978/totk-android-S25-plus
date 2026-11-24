@@ -1,0 +1,229 @@
+name: Build TotK Native APK (Galaxy S25+ Optimized)
+
+on:
+  workflow_dispatch:
+    inputs:
+      merge_pr_44:
+        description: "Merge PR #44 (fix black ability wheel / weapon selector background)"
+        type: boolean
+        default: true
+      merge_pr_45:
+        description: "Merge PR #45 (TKMM RomFS mod & IPS patch importer)"
+        type: boolean
+        default: true
+      merge_pr_46:
+        description: "Merge PR #46 (Lossless.dll / Lossless Scaling frame generation menu)"
+        type: boolean
+        default: true
+      merge_pr_43:
+        description: "Merge PR #43 (fix air-flow / wind white boxes)"
+        type: boolean
+        default: true
+      s25_opt:
+        description: "Enable S25+ Oryon v2 compiler flags (-O3, ThinLTO, ARMv8.6-A)"
+        type: boolean
+        default: true
+      version_name:
+        description: "APK versionName (e.g. 1.0.2-s25)"
+        type: string
+        default: "1.0.2-s25"
+
+permissions:
+  contents: read
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Merge selected upstream PRs (#44, #45, #46, #43)
+        env:
+          MERGE_44: ${{ inputs.merge_pr_44 }}
+          MERGE_45: ${{ inputs.merge_pr_45 }}
+          MERGE_46: ${{ inputs.merge_pr_46 }}
+          MERGE_43: ${{ inputs.merge_pr_43 }}
+        run: |
+          set -euo pipefail
+          git config user.name "totk-s25-builder"
+          git config user.email "totk-s25-builder@users.noreply.github.com"
+          git remote add upstream https://github.com/AurelioB/totk-android.git 2>/dev/null || true
+
+          merge_pr() {
+            local pr="$1"
+            echo "=== Fetching & merging upstream PR #${pr} ==="
+            git fetch upstream "pull/${pr}/head:pr-${pr}"
+            git merge --no-edit "pr-${pr}"
+          }
+
+          [ "${MERGE_44}" = "true" ] && merge_pr 44
+          [ "${MERGE_45}" = "true" ] && merge_pr 45
+          [ "${MERGE_46}" = "true" ] && merge_pr 46
+          [ "${MERGE_43}" = "true" ] && merge_pr 43
+          echo "Merged commit HEAD: $(git rev-parse --short HEAD)"
+
+      - name: Verify S25+ runtime auto-tuner unit tests
+        run: |
+          set -euo pipefail
+          cc -std=c11 -Wall -Wextra -Werror -fsanitize=undefined -fno-sanitize-recover=all \
+            tests/test_s25_profile.c -o "$RUNNER_TEMP/test_s25_profile"
+          "$RUNNER_TEMP/test_s25_profile"
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install Python build dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install cryptography==50.0.2
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: "temurin"
+          java-version: "17"
+
+      - name: Set up .NET 10 SDK (for NativeAOT shader translator)
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "10.0.x"
+
+      - name: Cache Android NDK r28c
+        id: cache-ndk
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.ANDROID_HOME }}/ndk/28.2.13676358
+          key: android-ndk-28.2.13676358-linux
+
+      - name: Install Android SDK components & NDK r28c
+        run: |
+          set -euo pipefail
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null 2>&1 || true
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" \
+            "platforms;android-33" \
+            "build-tools;35.0.0" \
+            "ndk;28.2.13676358"
+          echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/28.2.13676358" >> "$GITHUB_ENV"
+
+      - name: Read pinned Turnip SHA-256
+        id: turnip-pin
+        run: |
+          SHA=$(python3 -c "import sys; sys.path.insert(0, 'games/totk/android/apk'); import audit_apk; print(audit_apk.TURNIP_SHA256)")
+          echo "sha256=$SHA" >> "$GITHUB_OUTPUT"
+          echo "Pinned Turnip SHA-256: $SHA"
+
+      - name: Cache pinned Mesa Turnip driver
+        id: cache-turnip
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/turnip-cache
+          key: turnip-${{ steps.turnip-pin.outputs.sha256 }}
+
+      - name: Obtain pinned Mesa Turnip driver (fast release extract or source build fallback)
+        env:
+          WANT_SHA: ${{ steps.turnip-pin.outputs.sha256 }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/turnip-cache"
+          TARGET="$RUNNER_TEMP/turnip-cache/libtotk_turnip.so"
+
+          if [ -f "$TARGET" ] && [ "$(sha256sum "$TARGET" | awk '{print $1}')" = "$WANT_SHA" ]; then
+            echo "Using cached Turnip driver ($WANT_SHA)"
+            exit 0
+          fi
+
+          echo "Attempting fast extract from official AurelioB/totk-android release APK..."
+          APK_URL=$(curl -fsSL https://api.github.com/repos/AurelioB/totk-android/releases/latest \
+            | python3 -c "import sys, json; r=json.load(sys.stdin); print(next((a['browser_download_url'] for a in r.get('assets',[]) if a['name'].endswith('.apk')), ''))" || true)
+
+          if [ -n "$APK_URL" ]; then
+            curl -fsSL "$APK_URL" -o "$RUNNER_TEMP/upstream-release.apk" || true
+            if [ -f "$RUNNER_TEMP/upstream-release.apk" ]; then
+              unzip -p "$RUNNER_TEMP/upstream-release.apk" lib/arm64-v8a/libtotk_turnip.so > "$TARGET" 2>/dev/null || true
+              rm -f "$RUNNER_TEMP/upstream-release.apk"
+            fi
+          fi
+
+          if [ -f "$TARGET" ] && [ "$(sha256sum "$TARGET" | awk '{print $1}')" = "$WANT_SHA" ]; then
+            echo "Verified pinned Turnip driver extracted from official release!"
+            exit 0
+          fi
+
+          echo "Release extract did not match pinned SHA-256; building Mesa Turnip from source..."
+          rm -f "$TARGET"
+          TURNIP_VARIANTS=release TURNIP_WORK="$RUNNER_TEMP/turnip-build" games/totk/android/turnip/build.sh
+          BUILT=$(find "$RUNNER_TEMP/turnip-build" -name "driver.so" -o -name "libtotk_turnip.so" | head -n 1)
+          cp "$BUILT" "$TARGET"
+          GOT_SHA=$(sha256sum "$TARGET" | awk '{print $1}')
+          echo "Built Turnip SHA-256: $GOT_SHA (expected: $WANT_SHA)"
+          [ "$GOT_SHA" = "$WANT_SHA" ]
+
+      - name: Cache NativeAOT shader translator & release work dir
+        uses: actions/cache@v4
+        with:
+          path: games/totk/build/release/translator
+          key: totk-xlate-${{ hashFiles('games/totk/tools/totk_xlate/**', 'vendor/ryujinx/**') }}
+
+      - name: Prepare APK signing key
+        env:
+          SIGNING_KEY_BASE64: ${{ secrets.SIGNING_KEY_BASE64 }}
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEY_PATH="$RUNNER_TEMP/release-key.p12"
+          if [ -n "${SIGNING_KEY_BASE64:-}" ]; then
+            echo "$SIGNING_KEY_BASE64" | base64 -d > "$KEY_PATH"
+            echo "KEY_MODE=secret" >> "$GITHUB_ENV"
+          else
+            echo "No SIGNING_KEY_BASE64 secret set; generating a temporary PKCS#12 key for this build."
+            echo "Tip: Save your own .p12 key in repo secrets so future builds update in-place."
+            openssl req -x509 -newkey rsa:2048 -nodes \
+              -keyout "$RUNNER_TEMP/tmp.key" -out "$RUNNER_TEMP/tmp.crt" \
+              -days 3650 -subj "/CN=TotK Native S25Plus"
+            openssl pkcs12 -export -out "$KEY_PATH" \
+              -inkey "$RUNNER_TEMP/tmp.key" -in "$RUNNER_TEMP/tmp.crt" \
+              -passout pass:totk-s25-temp-pass
+            rm -f "$RUNNER_TEMP/tmp.key" "$RUNNER_TEMP/tmp.crt"
+            echo "SIGNING_KEY_PASSWORD=totk-s25-temp-pass" >> "$GITHUB_ENV"
+            echo "KEY_MODE=ephemeral" >> "$GITHUB_ENV"
+          fi
+          echo "SIGNING_KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
+
+      - name: Build and audit TotK Native S25+ APK
+        env:
+          SIGNING_KEY_PASSWORD: ${{ secrets.SIGNING_KEY_PASSWORD || env.SIGNING_KEY_PASSWORD }}
+          S25_OPT: ${{ inputs.s25_opt }}
+          VERSION_NAME: ${{ inputs.version_name }}
+        run: |
+          set -euo pipefail
+          EXTRA_ARGS=()
+          if [ "$S25_OPT" = "true" ]; then
+            EXTRA_ARGS+=(--s25-opt)
+          fi
+          python3 games/totk/android/build_release.py \
+            --ndk "$ANDROID_NDK_HOME" \
+            --android-sdk "$ANDROID_HOME" \
+            --turnip "$RUNNER_TEMP/turnip-cache/libtotk_turnip.so" \
+            --key "$SIGNING_KEY_PATH" \
+            --key-pass-env SIGNING_KEY_PASSWORD \
+            --version-name "$VERSION_NAME" \
+            -o "$RUNNER_TEMP/TotK-Native-S25Plus.apk" \
+            "${EXTRA_ARGS[@]}"
+          (cd "$RUNNER_TEMP" && sha256sum TotK-Native-S25Plus.apk > TotK-Native-S25Plus.apk.sha256)
+          cat "$RUNNER_TEMP/TotK-Native-S25Plus.apk.sha256"
+
+      - name: Upload S25+ APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TotK-Native-S25Plus-APK
+          path: |
+            ${{ runner.temp }}/TotK-Native-S25Plus.apk
+            ${{ runner.temp }}/TotK-Native-S25Plus.apk.sha256
+          retention-days: 30

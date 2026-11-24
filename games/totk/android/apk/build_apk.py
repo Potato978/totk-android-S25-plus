@@ -47,7 +47,7 @@ ATTR = {
     'exported': 0x01010010, 'process': 0x01010011, 'taskAffinity': 0x01010012, 'excludeFromRecents': 0x01010017,
     'launchMode': 0x0101001d, 'screenOrientation': 0x0101001e, 'configChanges': 0x0101001f,
     'value': 0x01010024, 'minSdkVersion': 0x0101020c, 'versionCode': 0x0101021b, 'versionName': 0x0101021c,
-    'targetSdkVersion': 0x01010270, 'allowBackup': 0x01010280, 'isGame': 0x010103f4, 'extractNativeLibs': 0x010104ea,
+    'targetSdkVersion': 0x01010270, 'allowBackup': 0x01010280, 'isGame': 0x010103f4, 'appCategory': 0x01010545, 'extractNativeLibs': 0x010104ea,
     'drawable': 0x01010199, 'roundIcon': 0x0101052c, 'foregroundServiceType': 0x01010599, 'hasFragileUserData': 0x0101059a,
     'fullBackupContent': 0x010104eb, 'dataExtractionRules': 0x0101063e,
     'relinquishTaskIdentity': 0x01010476,
@@ -104,7 +104,7 @@ def manifest_tree(package, label, version_code, version_name, min_sdk, target_sd
         ('uses-sdk', [(A, 'minSdkVersion', 'int', min_sdk), (A, 'targetSdkVersion', 'int', target_sdk)], []),
         *[('uses-permission', [(A, 'name', 'str', p)], []) for p in PERMISSIONS],
         ('application', [(A, 'label', 'str', label), (A, 'hasCode', 'bool', True), (A, 'debuggable', 'bool', not release),
-                         (A, 'extractNativeLibs', 'bool', True), (A, 'isGame', 'bool', True), (A, 'theme', 'ref', THEME_NOTITLEBAR_FULLSCREEN),
+                         (A, 'extractNativeLibs', 'bool', True), (A, 'isGame', 'bool', True), (A, 'appCategory', 'int', 0), (A, 'theme', 'ref', THEME_NOTITLEBAR_FULLSCREEN),
                          # Saves and setup state stay on the device: no cloud/adb backup of the app's private files, and
                          # Android asks before removing the (large, player-supplied) data on uninstall.
                          (A, 'allowBackup', 'bool', False), (A, 'hasFragileUserData', 'bool', True),

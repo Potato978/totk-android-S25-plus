@@ -1,5 +1,7 @@
 package com.aure.totk;
 
+import android.app.GameManager;
+import android.app.GameState;
 import android.app.NativeActivity;
 import android.content.Intent;
 import android.content.res.Configuration;
@@ -9,6 +11,7 @@ import android.util.Log;
 import android.view.AttachedSurfaceControl;
 import android.view.Display;
 import android.view.View;
+import android.view.WindowManager;
 import com.aure.totk.companion.AssetStore;
 import com.aure.totk.companion.CompanionNative;
 import com.aure.totk.companion.DisplayClass;
@@ -23,6 +26,7 @@ public final class TotkActivity extends NativeActivity {
     private PresentationController companion;
     /** Copies the saves to the player's save folder after each in-game save (null when no folder is set). */
     private SaveMirror.Watcher saves;
+    private TouchOverlay touchOverlay;
     private AttachedSurfaceControl presentRoot;
     private AttachedSurfaceControl.OnBufferTransformHintChangedListener presentHintListener;
     private long presentEpoch;
@@ -53,6 +57,16 @@ public final class TotkActivity extends NativeActivity {
     private static native void nativeTextInputDone(long serial, byte[] utf8);
     private static native void nativeGameFocus(boolean focused, boolean singleDisplay);
     private static native void nativeGameInputFocus(boolean top);
+    static native void nativeTouchButton(long mask, boolean down);
+    static native void nativeTouchStick(int stick, float x, float y);
+    private void setAndroidGameState(boolean active) {
+        if (Build.VERSION.SDK_INT < 33) return;
+        try {
+            GameManager gm = getSystemService(GameManager.class);
+            if (gm != null) gm.setGameState(new GameState(false,
+                active ? GameState.MODE_GAMEPLAY_UNINTERRUPTIBLE : GameState.MODE_NONE));
+        } catch (RuntimeException ignored) {}
+    }
 
     /** runtime/frontend_android.c, on this (the UI) thread: the game asks for text (nn::swkbd). TextEntry answers exactly
      * once: the UTF-8 text, or null when the player cancelled. */
@@ -144,6 +158,7 @@ public final class TotkActivity extends NativeActivity {
     }
     @Override protected void onCreate(Bundle state) {
         super.onCreate(state);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         // NativeActivity synchronously loads totk.env in ANativeActivity_onCreate.
         // Query only after super, before constructing a controller or display listener.
         // The companion art is generated on the device by the optional setup stage; without it the companion stays off.
@@ -151,6 +166,7 @@ public final class TotkActivity extends NativeActivity {
         saves = SaveMirror.Watcher.start(this);
         int given = nativeFeedbackEnabled();   // what start_game gave the game (TOTK_RUMBLE / TOTK_GYRO and the hardware)
         if (given != 0 && !isFinishing()) feedback = new GameFeedback(this, given);
+        if (!isFinishing()) touchOverlay = new TouchOverlay(this);
         if (!updateChecked) {
             updateChecked = true;
             Updates.check(this, version -> { updateVersion = version; showUpdate(); });
@@ -193,6 +209,7 @@ public final class TotkActivity extends NativeActivity {
         ensureMainDisplay();
         GameFeedback f = feedback;
         if (f != null) f.resume();
+        setAndroidGameState(true);
         showUpdate();
     }
     @Override public void onTopResumedActivityChanged(boolean top) {
@@ -216,6 +233,8 @@ public final class TotkActivity extends NativeActivity {
     @Override protected void onPause() {
         resumed = false;
         GameFeedback f = feedback;
+        setAndroidGameState(false);
+        if (touchOverlay != null) touchOverlay.onPause();
         if (f != null) f.pause();   // no motion in the background, and no motor left running
         super.onPause();
     }
@@ -228,6 +247,8 @@ public final class TotkActivity extends NativeActivity {
         updatePresentPrerotate(0);
         if (companion != null) { companion.close(); companion = null; }
         if (saves != null) { saves.close(1500); saves = null; }
+        setAndroidGameState(false);
+        if (touchOverlay != null) { touchOverlay.destroy(); touchOverlay = null; }
         if (feedback != null) { feedback.close(); feedback = null; }
         // Native onDestroy exits the process, so all Java teardown must precede this call.
         super.onDestroy();

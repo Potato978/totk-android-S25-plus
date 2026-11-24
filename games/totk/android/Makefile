@@ -136,6 +136,16 @@ PREFIX_MAP := -ffile-prefix-map=$(abspath $(TOTK)/../..)/= -ffile-prefix-map=$(a
 COMMON := $(PREFIX_MAP) -O2 -g $(PICFLAG) -fno-omit-frame-pointer -D_GNU_SOURCE -DTOTK_DEV_BUILD=$(DEV_BUILD) $(VDEF) $(PINS_DEF) -I$(OUT) -I$(TOTK)/runtime \
   -I$(TOTK)/third_party/d2r_gfx/gfx/nvn -I$(TOTK)/third_party/d2r_gfx/gfx/nvn/include
 COMMON += $(PROFILE_FLAGS) $(PGO_CFLAGS)
+S25_OPT ?= 0
+ifeq ($(TARGET),android)
+  ifeq ($(S25_OPT),1)
+    # Snapdragon 8 Elite (Oryon v2 / ARMv8.6-A) + ThinLTO + -O3 tuning for S25+
+    S25_CFLAGS := -O3 -fomit-frame-pointer -march=armv8.6-a+crypto+fp16+dotprod+i8mm+bf16 -flto=thin
+    S25_LDFLAGS := -flto=thin -Wl,--thinlto-jobs=4 -Wl,-O2
+    COMMON += $(S25_CFLAGS)
+    PGO_LDFLAGS += $(S25_LDFLAGS)
+  endif
+endif
 PSO_COLLECT ?= 0
 COMMON += -DTOTK_PSO_COLLECT_DEFAULT=$(PSO_COLLECT)
 ifneq ($(OPUS),)
@@ -269,7 +279,7 @@ $(addprefix $(OUT)/,vktest vkdrawtest vkrecspantest vkpipetest vkdrawtest-app vk
 vktest: $(OUT)/vkpositiontest
 .PHONY: vkpositiontest
 vkpositiontest: $(OUT)/vkpositiontest
-$(OUT)/vkpositiontest: $(TOTK)/android/gfx/test_vk_position.c $(TOTK)/android/gfx/vk_position.h $(TOTK)/android/gfx/vk_varyings.h $(TOTK)/android/gfx/vk_seed_pack.h
+$(OUT)/vkpositiontest: $(TOTK)/android/gfx/test_vk_position.c $(TOTK)/android/gfx/vk_position.h $(TOTK)/android/gfx/vk_seed_pack.h
 	@mkdir -p $(dir $@)
 	$(CC) -std=c11 -D_GNU_SOURCE -O1 -g $(WARN) -o $@ $<
 $(addprefix $(OUT)/,vktest vkdrawtest vkrecspantest vkpipetest vkdrawtest-app vkoverlaytest vkposttest vkframegentest vknativeuitest vkxlatetest vkpcachetest poolfintest vkreplaypintest vkrectest vkcanvastest): $(TOTK)/android/gfx/vk_position.h
