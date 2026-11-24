@@ -18,7 +18,7 @@ on:
       version_name:
         description: "APK versionName (e.g. 1.0.2-s25)"
         type: string
-        default: "1.0.4-s25"
+        default: "1.0.5-s25"
 
 permissions:
   contents: read
@@ -42,6 +42,7 @@ jobs:
           set -euo pipefail
           git config user.name "totk-s25-builder"
           git config user.email "totk-s25-builder@users.noreply.github.com"
+          git config merge.conflictStyle diff3
           git remote add upstream https://github.com/AurelioB/totk-android.git 2>/dev/null || true
 
           resolve_pr45_pr46_conflicts() {
@@ -60,47 +61,73 @@ jobs:
               print("::error::Unexpected merge conflicts outside PR #45/#46 overlap:", unknown)
               sys.exit(1)
 
-          conflict_re = re.compile(r"<<<<<<< [^\n]*\n(.*?)=======\n(.*?)>>>>>>> [^\n]*\n", re.DOTALL)
+          conflict_re = re.compile(
+              r"<<<<<<< [^\n]*\n(.*?)\|\|\|\|\|\|\| [^\n]*\n(.*?)=======\n(.*?)>>>>>>> [^\n]*\n",
+              re.DOTALL,
+          )
+
+          def merge_diff3_hunk(filename, ours, base, theirs):
+              # Special case 1: comma-separated REQ_* = N declarations in SetupActivity.java
+              if (
+                  filename.endswith("SetupActivity.java")
+                  and "REQ_" in ours
+                  and "REQ_" in theirs
+                  and ";" in ours
+                  and ";" in theirs
+                  and "if (" not in ours
+              ):
+                  indent_m = re.match(r"([ \t]*)", ours)
+                  indent = indent_m.group(1) if indent_m else "            "
+                  prefix = "private static final int " if "private static final int " in ours else ""
+                  pairs, seen_names, used_vals = [], set(), set()
+                  for side in (ours, theirs):
+                      for name, val in re.findall(r"(REQ_[A-Z0-9_]+)\s*=\s*(\d+)", side):
+                          if name in seen_names:
+                              continue
+                          v = int(val)
+                          seen_names.add(name)
+                          while v in used_vals:
+                              v += 1
+                          used_vals.add(v)
+                          pairs.append(f"{name} = {v}")
+                  if pairs:
+                      return f"{indent}{prefix}" + ", ".join(pairs) + ";\n"
+
+              # Special case 2: pure adjacent insertion (base is empty) -> keep BOTH verbatim (never drop braces/try!)
+              if not base:
+                  return ours + theirs
+
+              # Special case 3: both sides kept base as prefix -> keep ours + theirs' addition after base
+              if ours.startswith(base) and theirs.startswith(base):
+                  return ours + theirs[len(base):]
+
+              # Special case 4: both sides kept base as suffix -> keep ours' prefix + theirs
+              if ours.endswith(base) and theirs.endswith(base):
+                  return ours[:-len(base)] + theirs
+
+              # General diff3 fallback: strip only exact common prefix/suffix lines between base and theirs
+              b_lines = base.splitlines(keepends=True)
+              t_lines = theirs.splitlines(keepends=True)
+              p_len = 0
+              while p_len < len(b_lines) and p_len < len(t_lines) and b_lines[p_len] == t_lines[p_len]:
+                  p_len += 1
+              s_len = 0
+              while (
+                  s_len < len(b_lines) - p_len
+                  and s_len < len(t_lines) - p_len
+                  and b_lines[len(b_lines) - 1 - s_len] == t_lines[len(t_lines) - 1 - s_len]
+              ):
+                  s_len += 1
+              theirs_delta = "".join(t_lines[p_len : len(t_lines) - s_len if s_len else len(t_lines)])
+              return ours + theirs_delta
 
           for f in unmerged:
               p = Path(f)
               txt = p.read_text()
-
-              def merge_hunk(m):
-                  ours, theirs = m.group(1), m.group(2)
-                  # Special case: comma-separated REQ_* = N declarations in SetupActivity.java
-                  if f.endswith("SetupActivity.java") and "REQ_" in ours and "REQ_" in theirs and ";" in ours and ";" in theirs and "if (" not in ours:
-                      indent_m = re.match(r"([ \t]*)", ours)
-                      indent = indent_m.group(1) if indent_m else "            "
-                      prefix = ""
-                      if "private static final int " in ours:
-                          prefix = "private static final int "
-                      pairs = []
-                      seen_names = set()
-                      used_vals = set()
-                      for side in (ours, theirs):
-                          for name, val in re.findall(r"(REQ_[A-Z0-9_]+)\s*=\s*(\d+)", side):
-                              v = int(val)
-                              if name in seen_names:
-                                  continue
-                              seen_names.add(name)
-                              while v in used_vals:
-                                  v += 1
-                              used_vals.add(v)
-                              pairs.append(f"{name} = {v}")
-                      if pairs:
-                          return f"{indent}{prefix}" + ", ".join(pairs) + ";\n"
-
-                  # General union merge: keep ours, then append lines from theirs not already in ours
-                  our_lines = ours.splitlines(keepends=True)
-                  our_stripped = {l.strip() for l in our_lines if l.strip()}
-                  extra = [l for l in theirs.splitlines(keepends=True) if not l.strip() or l.strip() not in our_stripped]
-                  return "".join(our_lines) + "".join(extra)
-
-              resolved, count = conflict_re.subn(merge_hunk, txt)
-              assert "<<<<<<<" not in resolved, f"Unresolved marker remained in {f}"
+              resolved, count = conflict_re.subn(lambda m: merge_diff3_hunk(f, m.group(1), m.group(2), m.group(3)), txt)
+              assert "<<<<<<<" not in resolved and "|||||||" not in resolved and ">>>>>>>" not in resolved, f"Unresolved marker in {f}"
               p.write_text(resolved)
-              print(f"Auto-resolved {count} conflict hunk(s) in {f}")
+              print(f"Auto-resolved {count} diff3 conflict hunk(s) in {f}")
               subprocess.check_call(["git", "add", f])
           PY
           }
@@ -115,7 +142,7 @@ jobs:
             fi
             echo "=== Merging upstream PR #${pr} ==="
             if ! git merge --no-edit "pr-${pr}"; then
-              echo "Attempting automatic union conflict resolution for PR #${pr}..."
+              echo "Attempting exact diff3 conflict resolution for PR #${pr}..."
               resolve_pr45_pr46_conflicts
               git commit --no-edit
             fi
