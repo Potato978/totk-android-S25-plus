@@ -107,13 +107,16 @@ static inline int totk_s25_profile_apply_for(const char *soc, const char *model)
         count += totk_s25_set_default("TOTK_VK_SPLIT_PASS_DRAWS", "512", applied, sizeof applied, &used);
     }
 
-    /* 5. Recompiled TotK v1.4.3 game-code patches: cut 4th distant shadow cascade, cap point-light
-     *    shadow casters, and retarget native DRS to match 40/60 FPS or Frame Gen headroom. */
-    count += totk_s25_set_default("TOTK_SHADOW_CASCADES", "3", applied, sizeof applied, &used);
-    count += totk_s25_set_default("TOTK_POINT_SHADOWS", "2", applied, sizeof applied, &used);
-    if (!fg && fps60) {
-        count += totk_s25_set_default("TOTK_DRS60", "1", applied, sizeof applied, &used);
-    } else if (fg && !fps60) {
+    /* 5. Recompiled TotK v1.4.3 game-code patches:
+     *    - Without Frame Gen: cut 4th distant shadow cascade (+352), cap point-light shadows (+384), and enable DRS60 (+320).
+     *    - With Frame Gen: enable DRS_FRAMEGEN (+352..+416) without colliding on the +352 veneer slot. */
+    if (!fg) {
+        count += totk_s25_set_default("TOTK_SHADOW_CASCADES", "3", applied, sizeof applied, &used);
+        count += totk_s25_set_default("TOTK_POINT_SHADOWS", "2", applied, sizeof applied, &used);
+        if (fps60) {
+            count += totk_s25_set_default("TOTK_DRS60", "1", applied, sizeof applied, &used);
+        }
+    } else if (!fps60) {
         count += totk_s25_set_default("TOTK_DRS_FRAMEGEN", "1", applied, sizeof applied, &used);
     }
 

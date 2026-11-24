@@ -47,7 +47,7 @@ int main(void) {
     setenv("TOTK_FPS60", "0", 1);
     setenv("TOTK_FRAMEGEN", "locked", 1);
     n = totk_s25_profile_apply_for("SM8750", "SM-S936U");
-    assert(n == 19);
+    assert(n == 17);
     assert(getenv("TOTK_VK_SPLIT_PASS_DRAWS") == NULL);
     assert(getenv("TOTK_DRS60") == NULL);
     assert(!strcmp(getenv("TOTK_DRS_FRAMEGEN"), "1"));

@@ -766,7 +766,7 @@ static void patch_shadow_cascades(Module *m){
     if(!e||!*e||!strcmp(e,"0"))return;
     if(strlen(e)!=1||e[0]<'1'||e[0]>'3')runtime_fail("TOTK_SHADOW_CASCADES must be 0 (unchanged), 1, 2 or 3");
     unsigned n=(unsigned)(e[0]-'0');
-    uint64_t stub=((m->text_end+15)&~15ULL)+1072;   /* after menu_capture (+1040..1056); avoids DRS framegen (+352..416) */
+    uint64_t stub=((m->text_end+15)&~15ULL)+352;
     const Patch sites[]={
         {0x683418,0}, /* ldr w15,[x0,#0xfc]: configured count */
         {0x6834f8,0}, /* mov w16,w15: ordinary active count */
@@ -780,7 +780,7 @@ static void patch_shadow_cascades(Module *m){
     enum { CODE_WORDS=7 };
     if(stub>m->size||CODE_WORDS*4>m->size-stub||
        stub+CODE_WORDS*4>((m->text_end+0xfff)&~0xfffULL))
-        runtime_fail("1.4.3 shadow-cascade veneer layout");
+        { fprintf(stderr, "[totk] 1.4.3 TOTK_SHADOW_CASCADES skipped: veneer layout\n"); return; }
     uint32_t orig[sizeof sites/sizeof *sites];
     verify_render_sites(m,sites,sizeof sites/sizeof *sites,orig,"b62bb58073d00daa93e9cc57d25aa6ec65cfa3abd023a815bcd951f3e9fa6541");
     uint32_t code[CODE_WORDS]={
@@ -794,7 +794,7 @@ static void patch_shadow_cascades(Module *m){
     };
     uint32_t jump=branch(0x683500,stub);
     for(size_t i=0;i<sizeof code;i++)if(m->base[stub+i])
-        runtime_fail("1.4.3 shadow-cascade veneer padding not empty");
+        { fprintf(stderr, "[totk] 1.4.3 TOTK_SHADOW_CASCADES skipped: veneer padding in use\n"); return; }
     memcpy(m->base+stub,code,sizeof code);
     memcpy(m->base+0x683500,&jump,4);
     fprintf(stderr,"[totk] 1.4.3 TOTK_SHADOW_CASCADES=%u applied: configured and active directional cascades capped at %u, main+0x683500 %08x -> %08x, veneer +%#llx; check far-shadow coverage visually\n",
@@ -811,7 +811,7 @@ static void patch_point_shadows(Module *m){
     if(!e||!*e)return;
     char *end;long n=strtol(e,&end,10);
     if(end==e||*end||n<0||n>64)runtime_fail("TOTK_POINT_SHADOWS must be unset or 0..64 (budget cap; 0 is a diagnostic)");
-    uint64_t stub=((m->text_end+15)&~15ULL)+1104;   /* after shadow_cascades (+1072..1100); avoids DRS framegen (+352..416) */
+    uint64_t stub=((m->text_end+15)&~15ULL)+384;
     const Patch sites[]={
         {0xb866b0,0}, /* bl accessor 0xb87550 */
         {0xb866b4,0}, /* ldr w1,[x0]: budget, replaced and replayed */
@@ -824,7 +824,7 @@ static void patch_point_shadows(Module *m){
     enum { CODE_WORDS=5 };
     if(stub>m->size||CODE_WORDS*4>m->size-stub||
        stub+CODE_WORDS*4>((m->text_end+0xfff)&~0xfffULL))
-        runtime_fail("1.4.3 point-shadow veneer layout");
+        { fprintf(stderr, "[totk] 1.4.3 TOTK_POINT_SHADOWS skipped: veneer layout\n"); return; }
     uint32_t orig[sizeof sites/sizeof *sites];
     verify_render_sites(m,sites,sizeof sites/sizeof *sites,orig,"bcc839fc979a4cc351a043f9050e56816c9364bb871d50953d740d14b2bcc78a");
     uint32_t code[CODE_WORDS]={
@@ -836,7 +836,7 @@ static void patch_point_shadows(Module *m){
     };
     uint32_t jump=branch(0xb866b4,stub);
     for(size_t i=0;i<sizeof code;i++)if(m->base[stub+i])
-        runtime_fail("1.4.3 point-shadow veneer padding not empty");
+        { fprintf(stderr, "[totk] 1.4.3 TOTK_POINT_SHADOWS skipped: veneer padding in use\n"); return; }
     memcpy(m->base+stub,code,sizeof code);
     memcpy(m->base+0xb866b4,&jump,4);
     fprintf(stderr,"[totk] 1.4.3 TOTK_POINT_SHADOWS=%ld applied: point-shadow pool budget=min(original,%ld), main+0xb866b4 %08x -> %08x, veneer +%#llx%s\n",
@@ -1051,12 +1051,19 @@ static void patch_menu_capture(Module *m){
 #if TARGET_OS_IPHONE
     (void)m;return;
 #else
-    uint64_t stub=((m->text_end+15)&~15ULL)+1040;   /* after patch_thermal_step (+916, 108 bytes -> +1024) */
     const Patch guards[]={{0x105bbcc,0},{0x105bbd0,0}};   /* ldrb w8, [x0, #0xd5]; cbnz w8 (armed) */
     uint32_t orig[2];
-    if(stub+16>((m->text_end+0xfff)&~0xfffULL)){fprintf(stderr,"[totk] 1.4.3 menu capture fix skipped: veneer layout\n");return;}
     if(!code_guard(m,SITES(guards),orig,"a5e2a3003d86bfbb936dc67e51990369aea8bf463786eea310b99463fc3a901d")){fprintf(stderr,"[totk] 1.4.3 menu capture fix skipped: original instruction mismatch\n");return;}
-    for(unsigned i=0;i<16;i++)if(m->base[stub+i]){fprintf(stderr,"[totk] 1.4.3 menu capture fix skipped: veneer space in use\n");return;}
+    uint64_t page_end=(m->text_end+0xfff)&~0xfffULL, base_stub=(m->text_end+15)&~15ULL, stub=0;
+    const uint64_t candidates[]={1024, 288, 960};
+    for(unsigned c=0;c<3;c++){
+        uint64_t cand=base_stub+candidates[c];
+        if(cand+16>page_end||cand+16>m->size)continue;
+        int free_slot=1;
+        for(unsigned i=0;i<16;i++)if(m->base[cand+i]){free_slot=0;break;}
+        if(free_slot){stub=cand;break;}
+    }
+    if(!stub){fprintf(stderr,"[totk] 1.4.3 menu capture fix skipped: no free 16B veneer slot\n");return;}
     const uint32_t veneer[]={orig[0],     /* ldrb w8, [x0, #0xd5]: armed */
         0x39435009,                       /* ldrb w9, [x0, #0xd4]: requested (x9 is scratch until 0x105bc0c) */
         0x2a090108,                       /* orr w8, w8, w9 */

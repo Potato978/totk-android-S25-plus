@@ -59,6 +59,20 @@ public final class TotkActivity extends NativeActivity {
     private static native void nativeGameInputFocus(boolean top);
     static native void nativeTouchButton(long mask, boolean down);
     static native void nativeTouchStick(int stick, float x, float y);
+    private void mirrorLogToExternal() {
+        try {
+            java.io.File src = new java.io.File(getFilesDir(), "game/totk.log");
+            java.io.File ext = getExternalFilesDir(null);
+            if (!src.isFile() || ext == null) return;
+            java.io.File dst = new java.io.File(ext, "totk-last.log");
+            try (java.io.FileInputStream in = new java.io.FileInputStream(src);
+                 java.io.FileOutputStream out = new java.io.FileOutputStream(dst)) {
+                byte[] buf = new byte[16384];
+                int n;
+                while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            }
+        } catch (Throwable ignored) {}
+    }
     private void setAndroidGameState(boolean active) {
         if (Build.VERSION.SDK_INT < 33) return;
         try {
@@ -79,6 +93,7 @@ public final class TotkActivity extends NativeActivity {
     /** runtime/game_error.h, on the failing native thread just before the process aborts (Vulkan device lost): open the
      * menu (process ":setup", which survives this one) with the reason instead of leaving the player on the home screen. */
     public void showGameError(String reason) {
+        mirrorLogToExternal();
         try {
             startActivity(new Intent().setClassName(this, "com.aure.totk.setup.SetupActivity")
                     .putExtra(SetupActivity.EXTRA_GAME_ERROR, reason));
@@ -166,7 +181,7 @@ public final class TotkActivity extends NativeActivity {
         saves = SaveMirror.Watcher.start(this);
         int given = nativeFeedbackEnabled();   // what start_game gave the game (TOTK_RUMBLE / TOTK_GYRO and the hardware)
         if (given != 0 && !isFinishing()) feedback = new GameFeedback(this, given);
-        if (!isFinishing()) touchOverlay = new TouchOverlay(this);
+        if (!isFinishing()) { try { touchOverlay = new TouchOverlay(this); } catch (Throwable t) { Log.e("TotkGame", "TouchOverlay init failed", t); } }
         if (!updateChecked) {
             updateChecked = true;
             Updates.check(this, version -> { updateVersion = version; showUpdate(); });
@@ -234,6 +249,7 @@ public final class TotkActivity extends NativeActivity {
         resumed = false;
         GameFeedback f = feedback;
         setAndroidGameState(false);
+        mirrorLogToExternal();
         if (touchOverlay != null) touchOverlay.onPause();
         if (f != null) f.pause();   // no motion in the background, and no motor left running
         super.onPause();

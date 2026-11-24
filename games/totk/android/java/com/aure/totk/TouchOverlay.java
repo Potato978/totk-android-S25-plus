@@ -323,11 +323,39 @@ final class TouchOverlay {
         });
         bar.addView(resetBtn);
 
+        TextView logBtn = makeChip("Log", 0xFF2B3A4A);
+        logBtn.setOnClickListener(v -> shareLog());
+        bar.addView(logBtn);
+
         TextView doneBtn = makeChip("Done", 0xFF1F6FEB);
         doneBtn.setOnClickListener(v -> setEditMode(false));
         bar.addView(doneBtn);
 
         return bar;
+    }
+
+    private void shareLog() {
+        try {
+            java.io.File log = new java.io.File(activity.getFilesDir(), "game/totk.log");
+            String text;
+            if (!log.isFile()) {
+                text = "totk.log not found in internal storage.";
+            } else {
+                long len = log.length();
+                int keep = (int) Math.min(len, 12288L);
+                byte[] buf = new byte[keep];
+                try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(log, "r")) {
+                    raf.seek(len - keep);
+                    raf.readFully(buf);
+                }
+                text = new String(buf, java.nio.charset.StandardCharsets.UTF_8);
+            }
+            android.content.Intent i = new android.content.Intent(android.content.Intent.ACTION_SEND);
+            i.setType("text/plain");
+            i.putExtra(android.content.Intent.EXTRA_SUBJECT, "TotK Native S25+ totk.log");
+            i.putExtra(android.content.Intent.EXTRA_TEXT, text);
+            activity.startActivity(android.content.Intent.createChooser(i, "Share totk.log"));
+        } catch (Throwable ignored) {}
     }
 
     private TextView makeChip(String text, int bgColor) {
