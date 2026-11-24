@@ -37,6 +37,8 @@ static void JNICALL native_present_transform_hint(JNIEnv *env, jclass cls, jlong
 void runtime_android_text_done(JNIEnv *env, jclass cls, jlong serial, jbyteArray utf8);   /* frontend_android.c: swkbd */
 void runtime_android_game_focus(JNIEnv *env, jclass cls, jboolean focused, jboolean single_display);
 void runtime_android_game_input_focus(JNIEnv *env, jclass cls, jboolean top);
+void runtime_android_touch_button(JNIEnv *env, jclass cls, jlong mask, jboolean down);
+void runtime_android_touch_stick(JNIEnv *env, jclass cls, jint stick, jfloat x, jfloat y);
 /* feedback_android.c: the game's rumble and six-axis sensor */
 void runtime_android_motion(JNIEnv *env, jclass cls, jfloat ax, jfloat ay, jfloat az, jfloat gx, jfloat gy, jfloat gz);
 void runtime_android_motion_live(JNIEnv *env, jclass cls, jboolean on, jstring source);

@@ -364,13 +364,13 @@ def audit_entries(apk):
 
 
 def app(*, work, ndk, logs, out, key, key_pass_env=None, make_key=False, release=True, turnip=None, translator=None,
-        android_sdk=None, version_code=None, version_name=None, jobs=os.cpu_count() or 4):
+        android_sdk=None, version_code=None, version_name=None, jobs=os.cpu_count() or 4, s25_opt=False):
     """The whole app from the repository: native libraries, translator, dex, assets, signed and audited APK. Shared by the
     public release (release=True, the caller's key and the pinned Turnip) and build_android.py --apk (a debuggable build
     signed with the work folder's developer key)."""
     work, out = Path(work), Path(out)
     work.mkdir(parents=True, exist_ok=True)
-    libs = build_native(work, ndk, logs, release=release, jobs=jobs)
+    libs = build_native(work, ndk, logs, release=release, jobs=jobs, s25_opt=s25_opt)
     libs = strip_debug(libs, work, ndk, logs)   # every APK passes the same audit; the full libraries stay in <work>/symbols
     xlate = release_translator(translator, work, ndk, logs)
     dex = build_classes(android_sdk, work / 'classes.dex', logs)
@@ -417,7 +417,7 @@ def main(argv):
     t0 = time.time()
     app(work=work, ndk=ndk, logs=logs, out=out, key=key, key_pass_env=args.key_pass_env, release=True, turnip=turnip,
         translator=args.translator, android_sdk=args.android_sdk, version_code=args.version_code, version_name=args.version_name,
-        jobs=args.jobs)
+        jobs=args.jobs, s25_opt=args.s25_opt)
     say(f'done in {(time.time() - t0) / 60:.0f} min: {out} (sha256 {sha256(out)})')
 
 
