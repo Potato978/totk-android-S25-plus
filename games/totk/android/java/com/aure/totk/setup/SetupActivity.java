@@ -2353,6 +2353,34 @@ public final class SetupActivity extends Activity implements SetupService.Listen
         prompts(prompt("A", Strings.P_SELECT, v -> selectFocused()), backPrompt());
     }
 
+    private void shareGameLog() {
+        try {
+            File dir = InstallState.read(this).gameDir(this);
+            File log = dir != null ? new File(dir, "totk.log") : new File(getFilesDir(), "game/totk.log");
+            if (!log.isFile()) log = new File(getFilesDir(), "game/totk.log");
+            String text;
+            if (!log.isFile()) {
+                text = "totk.log not found yet (checked " + log.getAbsolutePath() + "). Try launching the game once first.";
+            } else {
+                long len = log.length();
+                int keep = (int) Math.min(len, 24576L);
+                byte[] buf = new byte[keep];
+                try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(log, "r")) {
+                    raf.seek(len - keep);
+                    raf.readFully(buf);
+                }
+                text = new String(buf, StandardCharsets.UTF_8);
+            }
+            Intent send = new Intent(Intent.ACTION_SEND);
+            send.setType("text/plain");
+            send.putExtra(Intent.EXTRA_SUBJECT, "TotK Native S25+ totk.log");
+            send.putExtra(Intent.EXTRA_TEXT, text);
+            startActivity(Intent.createChooser(send, "Share totk.log"));
+        } catch (Throwable failed) {
+            showNote("Could not read totk.log: " + failed);
+        }
+    }
+
     // ---------- about and licences ----------
     private void about() {
         header("about", Strings.ABOUT, 0, null);
@@ -2368,6 +2396,8 @@ public final class SetupActivity extends Activity implements SetupService.Listen
         Widgets.Row licencesRow = listRow(list, "about:licences", Strings.LICENCES_ROW, Strings.LICENCES_HINT, 92, 18);
         licencesRow.setOnClickListener(v -> go(Screen.LICENSES));
         Widgets.Row project = listRow(list, "about:project", Strings.PROJECT_ROW, Strings.PROJECT_URL, 92, 18);
+        Widgets.Row gameLogRow = listRow(list, "about:gamelog", "Share game log (totk.log)", "Send or copy the last crash/runtime log", 92, 18);
+        gameLogRow.setOnClickListener(v -> shareGameLog());
         Widgets.Row updateRow = updateSwitch(list);
         detailPanel();
         detailNote.setVisibility(View.GONE);

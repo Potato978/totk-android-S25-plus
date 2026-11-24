@@ -33,7 +33,6 @@ static inline int totk_s25_soc_match(const char *soc) {
 static inline int totk_s25_model_match(const char *model) {
     if (!model || !*model) return 0;
     while (isspace((unsigned char)*model)) model++;
-    /* Samsung Galaxy S25 (SM-S931*), S25+ (SM-S936*), S25 Edge (SM-S937*), S25 Ultra (SM-S938*). */
     return totk_s25_starts_with_ci(model, "SM-S931") ||
            totk_s25_starts_with_ci(model, "SM-S936") ||
            totk_s25_starts_with_ci(model, "SM-S937") ||
@@ -86,38 +85,24 @@ static inline int totk_s25_profile_apply_for(const char *soc, const char *model)
     count += totk_s25_set_default("TOTK_ADPF_LOAD_HINT", "1", applied, sizeof applied, &used);
     count += totk_s25_set_default("TOTK_ADPF_TARGET_PCT", "85", applied, sizeof applied, &used);
 
-    /* 2. Passive-cooling thermal headroom stepping (1 Hz AThermal_getThermalHeadroom). */
-    count += totk_s25_set_default("TOTK_THERMAL_STEP", "1", applied, sizeof applied, &used);
+    /* 2. Passive-cooling thermal headroom stepping (only active in FPS60/40 modes). */
+    if (fps60) {
+        count += totk_s25_set_default("TOTK_THERMAL_STEP", "1", applied, sizeof applied, &used);
+    }
 
     /* 3. Tight frame-pacing wakeups and priority for render/command-walking threads. */
     count += totk_s25_set_default("TOTK_TIMER_SLACK_NS", "1000", applied, sizeof applied, &used);
     count += totk_s25_set_default("TOTK_PRIO_RENDER", "-4", applied, sizeof applied, &used);
     count += totk_s25_set_default("TOTK_PRIO_WALK", "-8", applied, sizeof applied, &used);
-    count += totk_s25_set_default("TOTK_PRESENT_PREROTATE", "1", applied, sizeof applied, &used);
 
-    /* 4. Adreno 830 Vulkan GMEM, descriptor stock, and Oryon v2 worker thread scaling. */
-    count += totk_s25_set_default("TOTK_VK_LOAD_ELIDE", "1", applied, sizeof applied, &used);
-    count += totk_s25_set_default("TOTK_VK_STORE_CLEAR", "1", applied, sizeof applied, &used);
-    count += totk_s25_set_default("TOTK_PSO_PREDICT", "1", applied, sizeof applied, &used);
+    /* 4. Proven-safe Adreno 830 Vulkan & Oryon v2 worker thread scaling. */
     count += totk_s25_set_default("TOTK_VK_DESC_STOCK", "1", applied, sizeof applied, &used);
     count += totk_s25_set_default("TOTK_VK_UPLOAD_THREADS", "2", applied, sizeof applied, &used);
     count += totk_s25_set_default("TOTK_VK_COMPILE_THREADS", "4", applied, sizeof applied, &used);
     if (!fg) {
-        /* Pass splitting cannot run alongside frame-generation extraction. */
         count += totk_s25_set_default("TOTK_VK_SPLIT_PASS_DRAWS", "512", applied, sizeof applied, &used);
-    }
-
-    /* 5. Recompiled TotK v1.4.3 game-code patches:
-     *    - Without Frame Gen: cut 4th distant shadow cascade (+352), cap point-light shadows (+384), and enable DRS60 (+320).
-     *    - With Frame Gen: enable DRS_FRAMEGEN (+352..+416) without colliding on the +352 veneer slot. */
-    if (!fg) {
         count += totk_s25_set_default("TOTK_SHADOW_CASCADES", "3", applied, sizeof applied, &used);
         count += totk_s25_set_default("TOTK_POINT_SHADOWS", "2", applied, sizeof applied, &used);
-        if (fps60) {
-            count += totk_s25_set_default("TOTK_DRS60", "1", applied, sizeof applied, &used);
-        }
-    } else if (!fps60) {
-        count += totk_s25_set_default("TOTK_DRS_FRAMEGEN", "1", applied, sizeof applied, &used);
     }
 
     fprintf(stderr, "[totk-s25] active (soc=%s model=%s forced=%d fg=%d fps60=%d): applied %d defaults: %s\n",

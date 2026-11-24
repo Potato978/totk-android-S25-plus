@@ -140,7 +140,7 @@ S25_OPT ?= 0
 ifeq ($(TARGET),android)
   ifeq ($(S25_OPT),1)
     # Snapdragon 8 Elite (Oryon v2 / ARMv8.6-A) + ThinLTO + -O3 tuning for S25+
-    S25_CFLAGS := -O3 -fomit-frame-pointer -march=armv8.6-a+crypto+fp16+dotprod+i8mm+bf16 -flto=thin
+    S25_CFLAGS := -O3 -fno-omit-frame-pointer -march=armv8.4-a+crypto+fp16+dotprod -flto=thin
     S25_LDFLAGS := -flto=thin -Wl,--thinlto-jobs=4 -Wl,-O2
     COMMON += $(S25_CFLAGS)
     PGO_LDFLAGS += $(S25_LDFLAGS)

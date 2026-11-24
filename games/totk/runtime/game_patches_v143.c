@@ -1055,8 +1055,8 @@ static void patch_menu_capture(Module *m){
     uint32_t orig[2];
     if(!code_guard(m,SITES(guards),orig,"a5e2a3003d86bfbb936dc67e51990369aea8bf463786eea310b99463fc3a901d")){fprintf(stderr,"[totk] 1.4.3 menu capture fix skipped: original instruction mismatch\n");return;}
     uint64_t page_end=(m->text_end+0xfff)&~0xfffULL, base_stub=(m->text_end+15)&~15ULL, stub=0;
-    const uint64_t candidates[]={1024, 288, 960};
-    for(unsigned c=0;c<3;c++){
+    const uint64_t candidates[]={1024, 288};
+    for(unsigned c=0;c<2;c++){
         uint64_t cand=base_stub+candidates[c];
         if(cand+16>page_end||cand+16>m->size)continue;
         int free_slot=1;
