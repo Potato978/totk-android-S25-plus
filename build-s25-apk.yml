@@ -18,7 +18,7 @@ on:
       version_name:
         description: "APK versionName (e.g. 1.0.2-s25)"
         type: string
-        default: "1.0.4-s25"
+        default: "1.1.4-s25"
 
 permissions:
   contents: read
