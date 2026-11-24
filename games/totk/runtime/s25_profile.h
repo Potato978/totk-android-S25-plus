@@ -96,8 +96,6 @@ static inline int totk_s25_profile_apply_for(const char *soc, const char *model)
     count += totk_s25_set_default("TOTK_VK_COMPILE_THREADS", "4", applied, sizeof applied, &used);
     if (!fg) {
         count += totk_s25_set_default("TOTK_VK_SPLIT_PASS_DRAWS", "512", applied, sizeof applied, &used);
-        count += totk_s25_set_default("TOTK_SHADOW_CASCADES", "3", applied, sizeof applied, &used);
-        count += totk_s25_set_default("TOTK_POINT_SHADOWS", "2", applied, sizeof applied, &used);
     }
 
     fprintf(stderr, "[totk-s25] active (soc=%s model=%s forced=%d fg=%d fps60=%d): applied %d defaults: %s\n",
