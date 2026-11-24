@@ -65,11 +65,11 @@ final class TouchOverlay {
     private final FrameLayout root;
     private final OverlayCanvas canvasView;
     private final TextView togglePill;
-    private final LinearLayout editBar;
-    private final TextView selectedLabel;
-    private final TextView shapeBtn;
-    private final TextView hideBtn;
-    private final SeekBar scaleSeek;
+    private  LinearLayout editBar;
+    private  TextView selectedLabel;
+    private  TextView shapeBtn;
+    private  TextView hideBtn;
+    private  SeekBar scaleSeek;
     private final SeekBar alphaSeek;
 
     private final List<Control> controls = new ArrayList<>();
