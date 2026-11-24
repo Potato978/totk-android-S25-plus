@@ -49,6 +49,7 @@ final class GameFeedback implements SensorEventListener, InputManager.InputDevic
     private final float[] accel = new float[3], frame = new float[6];
     private boolean haveAccel;
     private volatile int quarterTurns;
+    private final DsuMotionClient dsu = new DsuMotionClient();
 
     /** Which of the two this device can drive right now (TotkActivity.feedbackHardware, before the game starts). */
     static int hardware(Context context) {
@@ -147,8 +148,11 @@ final class GameFeedback implements SensorEventListener, InputManager.InputDevic
             quarterTurns = display == null ? 0 : display.getRotation();
             SensorManager source = padSensors != null ? padSensors : activity.getSystemService(SensorManager.class);
             String name = padSensors != null ? sensorName : "this device";
-            if (!resumed) stopSensors();
-            else if (sensors == null || !name.equals(sensorSource)) { stopSensors(); startSensors(source, padSensors != null, name); }
+            if (!resumed) { dsu.stop(); stopSensors(); }
+            else {
+                if (!"0".equals(System.getenv("TOTK_DSU_GYRO"))) dsu.start();
+                if (sensors == null || !name.equals(sensorSource)) { stopSensors(); startSensors(source, padSensors != null, name); }
+            }
         }
     }
     private void startSensors(SensorManager source, boolean controller, String name) {
@@ -168,6 +172,7 @@ final class GameFeedback implements SensorEventListener, InputManager.InputDevic
     }
 
     @Override public void onSensorChanged(SensorEvent event) {
+        if (dsu.isActive()) return;
         int type = event.sensor.getType();
         if (type == Sensor.TYPE_ACCELEROMETER) { System.arraycopy(event.values, 0, accel, 0, 3); haveAccel = true; return; }
         if (type != Sensor.TYPE_GYROSCOPE || !haveAccel || sensors == null) return;

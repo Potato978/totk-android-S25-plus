@@ -1175,6 +1175,7 @@ public final class SetupActivity extends Activity implements SetupService.Listen
         homeItem(menu, "home:data", "data", Strings.GAME_DATA, missing ? StorageLocation.label(this) + " · " + Strings.NOT_AVAILABLE
                 : Strings.dataSummary(Strings.size(dataBytes()), SettingsStore.secondaryDisplay(this),
                         install.done("companion"), install.artOutdated(), install.done("shaders")), v -> go(Screen.DATA), 88, 8);
+        homeItem(menu, "home:s25", "gfx", "S25+ Tweaks & QoL", "Fullscreen 19.5:9, autoload save, draw distance, shadows, DSU gyro & log", v -> S25Tweaks.show(this), 88, 8);
         homeItem(menu, "home:about", "about", Strings.ABOUT, Strings.ABOUT_HINT, v -> go(Screen.ABOUT), 88, 0);
         primary = start;
         // The one-time move of an install made before private storage existed: asked once per visit to the menu.
@@ -2355,7 +2356,7 @@ public final class SetupActivity extends Activity implements SetupService.Listen
 
     private void shareGameLog() {
         try {
-            File dir = InstallState.read(this).gameDir(this);
+            File dir = InstallState.gameDir(this);
             File log = dir != null ? new File(dir, "totk.log") : new File(getFilesDir(), "game/totk.log");
             if (!log.isFile()) log = new File(getFilesDir(), "game/totk.log");
             String text;
@@ -2369,7 +2370,7 @@ public final class SetupActivity extends Activity implements SetupService.Listen
                     raf.seek(len - keep);
                     raf.readFully(buf);
                 }
-                text = new String(buf, StandardCharsets.UTF_8);
+                text = new String(buf, java.nio.charset.StandardCharsets.UTF_8);
             }
             Intent send = new Intent(Intent.ACTION_SEND);
             send.setType("text/plain");
@@ -2396,8 +2397,10 @@ public final class SetupActivity extends Activity implements SetupService.Listen
         Widgets.Row licencesRow = listRow(list, "about:licences", Strings.LICENCES_ROW, Strings.LICENCES_HINT, 92, 18);
         licencesRow.setOnClickListener(v -> go(Screen.LICENSES));
         Widgets.Row project = listRow(list, "about:project", Strings.PROJECT_ROW, Strings.PROJECT_URL, 92, 18);
+        Widgets.Row s25Row = listRow(list, "about:s25tweaks", "S25+ Tweaks & QoL", "Aspect ratio, autoload, shadows, draw distance, DSU gyro", 92, 18);
+        s25Row.setOnClickListener(v -> S25Tweaks.show(this));
         Widgets.Row gameLogRow = listRow(list, "about:gamelog", "Share game log (totk.log)", "Send or copy the last crash/runtime log", 92, 18);
-        gameLogRow.setOnClickListener(v -> shareGameLog());
+        gameLogRow.setOnClickListener(v -> S25Tweaks.shareLog(this));
         Widgets.Row updateRow = updateSwitch(list);
         detailPanel();
         detailNote.setVisibility(View.GONE);

@@ -2,29 +2,38 @@ package com.aure.totk;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.content.SharedPreferences;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.PixelFormat;
 import android.graphics.RectF;
 import android.graphics.Typeface;
 import android.graphics.drawable.GradientDrawable;
+import android.os.IBinder;
+import android.util.Log;
 import android.util.SparseArray;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.ScaleGestureDetector;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.WindowManager;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.SeekBar;
 import android.widget.TextView;
+import java.io.File;
+import java.io.RandomAccessFile;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 
 /** Toggleable, freely movable, freely scalable, shape-changing on-screen Switch controls for TotK Native.
- * Pure Android SDK (no XML resources or external libraries). Persists per-button layout in SharedPreferences. */
+ * Uses TYPE_APPLICATION_PANEL sub-windows (no extra permissions) so controls composite ABOVE NativeActivity's
+ * Vulkan / AHB child SurfaceControl (totk-ahb-ui). Persists per-button layout in SharedPreferences. */
 final class TouchOverlay {
     static final int SHAPE_CIRCLE = 0;
     static final int SHAPE_SQUARE = 1;
@@ -32,6 +41,7 @@ final class TouchOverlay {
     static final int SHAPE_OCTAGON = 3;
     private static final String[] SHAPE_NAMES = {"Circle", "Square", "Pill", "Octagon"};
 
+    private static final String TAG = "TotkTouchUI";
     private static final String PREFS = "totk_touch_ui";
     private static final float MIN_SCALE = 0.50f;
     private static final float MAX_SCALE = 2.20f;
@@ -60,12 +70,17 @@ final class TouchOverlay {
     }
 
     private final Activity activity;
+    private final WindowManager wm;
     private final SharedPreferences prefs;
     private final float dp;
-    private final FrameLayout root;
+
+    private final FrameLayout overlayRoot;
     private final OverlayCanvas canvasView;
-    private final TextView togglePill;
     private final LinearLayout editBar;
+    private final TextView togglePill;
+    private final WindowManager.LayoutParams overlayParams;
+    private final WindowManager.LayoutParams pillParams;
+
     private TextView selectedLabel;
     private TextView shapeBtn;
     private TextView hideBtn;
@@ -78,45 +93,80 @@ final class TouchOverlay {
     private int opacityPct = 65;
     private Control selected;
 
+    private boolean destroyed;
+    private boolean pillAttached;
+    private boolean overlayAttached;
+
     // Draggable toggle pill state
-    private float pillDownX, pillDownY, pillStartX, pillStartY;
+    private float pillDownX, pillDownY;
+    private int pillStartX, pillStartY;
     private boolean pillMoved;
 
     TouchOverlay(Activity activity) {
         this.activity = activity;
+        this.wm = activity.getWindowManager();
         this.prefs = activity.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         this.dp = activity.getResources().getDisplayMetrics().density;
 
         initControls();
         loadPrefs();
 
-        root = new FrameLayout(activity);
-        root.setLayoutParams(new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-
+        overlayRoot = new FrameLayout(activity);
         canvasView = new OverlayCanvas(activity);
-        root.addView(canvasView, new FrameLayout.LayoutParams(
+        overlayRoot.addView(canvasView, new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
 
-        // Floating top-center Edit Mode toolbar
         editBar = buildEditBar();
         FrameLayout.LayoutParams barLp = new FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
                 Gravity.TOP | Gravity.CENTER_HORIZONTAL);
-        barLp.topMargin = Math.round(10 * dp);
-        root.addView(editBar, barLp);
+        barLp.topMargin = Math.round(12 * dp);
+        overlayRoot.addView(editBar, barLp);
 
-        // Subtle draggable UI toggle pill in top-left corner
         togglePill = buildTogglePill();
-        FrameLayout.LayoutParams pillLp = new FrameLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.TOP | Gravity.START);
-        pillLp.leftMargin = Math.round(10 * dp);
-        pillLp.topMargin = Math.round(10 * dp);
-        root.addView(togglePill, pillLp);
 
-        activity.addContentView(root, new ViewGroup.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        overlayParams = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_PANEL,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT);
+        overlayParams.gravity = Gravity.TOP | Gravity.START;
+
+        pillParams = new WindowManager.LayoutParams(
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
+                WindowManager.LayoutParams.TYPE_APPLICATION_PANEL,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
+                        | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
+                        | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+                PixelFormat.TRANSLUCENT);
+        pillParams.gravity = Gravity.TOP | Gravity.START;
+        pillParams.x = Math.round(28 * dp);
+        pillParams.y = Math.round(18 * dp);
+
+        // Respect TOTK_TOUCH_UI=0 (from S25+ Tweaks & QoL) to hide even the UI pill for pure controller/Xreal play.
+        if ("0".equals(System.getenv("TOTK_TOUCH_UI"))) {
+            destroyed = true;
+            return;
+        }
+        // Attach sub-windows once the Activity's DecorView has a valid window token.
+        View decor = activity.getWindow().getDecorView();
+        decor.post(this::attachWhenReady);
+    }
+
+    private void attachWhenReady() {
+        if (destroyed || activity.isFinishing()) return;
+        View decor = activity.getWindow().getDecorView();
+        IBinder token = decor != null ? decor.getWindowToken() : null;
+        if (token == null) {
+            if (decor != null) decor.postDelayed(this::attachWhenReady, 150);
+            return;
+        }
+        overlayParams.token = token;
+        pillParams.token = token;
         syncUiState();
     }
 
@@ -179,21 +229,32 @@ final class TouchOverlay {
     }
 
     private TextView buildTogglePill() {
-        TextView tv = makeChip("UI", 0xAA181C24);
+        TextView tv = makeChip("UI", 0xCC18202C);
+        GradientDrawable bg = new GradientDrawable();
+        bg.setColor(0xCC18202C);
+        bg.setCornerRadius(14 * dp);
+        bg.setStroke(Math.round(1.5f * dp), 0xCC58A6FF);
+        tv.setBackground(bg);
+        tv.setTextSize(12f);
+        int ph = Math.round(12 * dp), pv = Math.round(7 * dp);
+        tv.setPadding(ph, pv, ph, pv);
+
         tv.setOnTouchListener((v, ev) -> {
             switch (ev.getActionMasked()) {
                 case MotionEvent.ACTION_DOWN:
                     pillDownX = ev.getRawX(); pillDownY = ev.getRawY();
-                    pillStartX = v.getX(); pillStartY = v.getY();
+                    pillStartX = pillParams.x; pillStartY = pillParams.y;
                     pillMoved = false;
-                    return false; // allow click/long-click
+                    return false;
                 case MotionEvent.ACTION_MOVE:
                     float dx = ev.getRawX() - pillDownX, dy = ev.getRawY() - pillDownY;
                     if (Math.hypot(dx, dy) > 8 * dp) {
                         pillMoved = true;
-                        float nx = clamp(pillStartX + dx, 0, Math.max(0, root.getWidth() - v.getWidth()));
-                        float ny = clamp(pillStartY + dy, 0, Math.max(0, root.getHeight() - v.getHeight()));
-                        v.setX(nx); v.setY(ny);
+                        pillParams.x = Math.max(0, Math.round(pillStartX + dx));
+                        pillParams.y = Math.max(0, Math.round(pillStartY + dy));
+                        if (pillAttached) {
+                            try { wm.updateViewLayout(togglePill, pillParams); } catch (Throwable ignored) {}
+                        }
                         return true;
                     }
                     return false;
@@ -228,9 +289,9 @@ final class TouchOverlay {
         int pad = Math.round(6 * dp);
         bar.setPadding(pad, pad, pad, pad);
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(0xDD111620);
+        bg.setColor(0xEE111620);
         bg.setCornerRadius(14 * dp);
-        bg.setStroke(Math.round(1 * dp), 0x8858A6FF);
+        bg.setStroke(Math.round(1.5f * dp), 0xCC58A6FF);
         bar.setBackground(bg);
 
         selectedLabel = makeChip("Tap btn", 0x00000000);
@@ -280,7 +341,7 @@ final class TouchOverlay {
 
         scaleSeek = new SeekBar(activity);
         scaleSeek.setMax(170); // 0.50 .. 2.20
-        LinearLayout.LayoutParams skLp = new LinearLayout.LayoutParams(Math.round(88 * dp), ViewGroup.LayoutParams.WRAP_CONTENT);
+        LinearLayout.LayoutParams skLp = new LinearLayout.LayoutParams(Math.round(84 * dp), ViewGroup.LayoutParams.WRAP_CONTENT);
         skLp.leftMargin = Math.round(4 * dp);
         scaleSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar s, int progress, boolean fromUser) {
@@ -298,7 +359,7 @@ final class TouchOverlay {
         alphaSeek = new SeekBar(activity);
         alphaSeek.setMax(80); // 20..100%
         alphaSeek.setProgress(opacityPct - 20);
-        LinearLayout.LayoutParams alLp = new LinearLayout.LayoutParams(Math.round(68 * dp), ViewGroup.LayoutParams.WRAP_CONTENT);
+        LinearLayout.LayoutParams alLp = new LinearLayout.LayoutParams(Math.round(64 * dp), ViewGroup.LayoutParams.WRAP_CONTENT);
         alLp.leftMargin = Math.round(4 * dp);
         alphaSeek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override public void onProgressChanged(SeekBar s, int progress, boolean fromUser) {
@@ -336,25 +397,25 @@ final class TouchOverlay {
 
     private void shareLog() {
         try {
-            java.io.File log = new java.io.File(activity.getFilesDir(), "game/totk.log");
+            File log = new File(activity.getFilesDir(), "game/totk.log");
             String text;
             if (!log.isFile()) {
                 text = "totk.log not found in internal storage.";
             } else {
                 long len = log.length();
-                int keep = (int) Math.min(len, 12288L);
+                int keep = (int) Math.min(len, 16384L);
                 byte[] buf = new byte[keep];
-                try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(log, "r")) {
+                try (RandomAccessFile raf = new RandomAccessFile(log, "r")) {
                     raf.seek(len - keep);
                     raf.readFully(buf);
                 }
-                text = new String(buf, java.nio.charset.StandardCharsets.UTF_8);
+                text = new String(buf, StandardCharsets.UTF_8);
             }
-            android.content.Intent i = new android.content.Intent(android.content.Intent.ACTION_SEND);
+            Intent i = new Intent(Intent.ACTION_SEND);
             i.setType("text/plain");
-            i.putExtra(android.content.Intent.EXTRA_SUBJECT, "TotK Native S25+ totk.log");
-            i.putExtra(android.content.Intent.EXTRA_TEXT, text);
-            activity.startActivity(android.content.Intent.createChooser(i, "Share totk.log"));
+            i.putExtra(Intent.EXTRA_SUBJECT, "TotK Native S25+ totk.log");
+            i.putExtra(Intent.EXTRA_TEXT, text);
+            activity.startActivity(Intent.createChooser(i, "Share totk.log"));
         } catch (Throwable ignored) {}
     }
 
@@ -391,10 +452,33 @@ final class TouchOverlay {
     }
 
     private void syncUiState() {
-        canvasView.setVisibility(enabled ? View.VISIBLE : View.GONE);
+        if (destroyed || pillParams.token == null) return;
+        // Keep overlayRoot below togglePill by attaching overlayRoot first when enabled.
+        if (enabled && !overlayAttached) {
+            try {
+                if (pillAttached) { wm.removeViewImmediate(togglePill); pillAttached = false; }
+                wm.addView(overlayRoot, overlayParams);
+                overlayAttached = true;
+            } catch (Throwable t) {
+                Log.w(TAG, "overlay attach failed", t);
+            }
+        } else if (!enabled && overlayAttached) {
+            try { wm.removeViewImmediate(overlayRoot); } catch (Throwable ignored) {}
+            overlayAttached = false;
+        }
+
+        if (!pillAttached) {
+            try {
+                wm.addView(togglePill, pillParams);
+                pillAttached = true;
+            } catch (Throwable t) {
+                Log.w(TAG, "pill attach failed", t);
+            }
+        }
+
         editBar.setVisibility(editMode ? View.VISIBLE : View.GONE);
         togglePill.setText(editMode ? "Editing" : enabled ? "UI: ON" : "UI");
-        togglePill.setAlpha(editMode ? 1.0f : enabled ? 0.72f : 0.42f);
+        togglePill.setAlpha(editMode ? 1.0f : enabled ? 0.85f : 0.65f);
         updateEditBar();
         canvasView.invalidate();
     }
@@ -412,9 +496,16 @@ final class TouchOverlay {
     }
 
     void destroy() {
+        destroyed = true;
         releaseAllInputs();
-        ViewGroup parent = (ViewGroup) root.getParent();
-        if (parent != null) parent.removeView(root);
+        if (pillAttached) {
+            try { wm.removeViewImmediate(togglePill); } catch (Throwable ignored) {}
+            pillAttached = false;
+        }
+        if (overlayAttached) {
+            try { wm.removeViewImmediate(overlayRoot); } catch (Throwable ignored) {}
+            overlayAttached = false;
+        }
     }
 
     private void releaseAllInputs() {
@@ -682,7 +773,6 @@ final class TouchOverlay {
             if (len > 1f) { dx /= len; dy /= len; }
             c.knobX = dx;
             c.knobY = dy;
-            // Switch Y axis: up is positive on Horizon/nxnative? Matches AMOTION_EVENT_AXIS_Y (-1 up, +1 down).
             TotkActivity.nativeTouchStick(c.stick, dx, dy);
         }
     }
