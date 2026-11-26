@@ -85,15 +85,18 @@ static inline int totk_s25_profile_apply_for(const char *soc, const char *model)
     count += totk_s25_set_default("TOTK_ADPF_LOAD_HINT", "1", applied, sizeof applied, &used);
     count += totk_s25_set_default("TOTK_ADPF_TARGET_PCT", "85", applied, sizeof applied, &used);
 
-    /* 3. Tight frame-pacing wakeups and priority for render/command-walking threads. */
+    /* 2. Tight frame-pacing wakeups and priority for render/command-walking threads. */
     count += totk_s25_set_default("TOTK_TIMER_SLACK_NS", "1000", applied, sizeof applied, &used);
     count += totk_s25_set_default("TOTK_PRIO_RENDER", "-4", applied, sizeof applied, &used);
     count += totk_s25_set_default("TOTK_PRIO_WALK", "-8", applied, sizeof applied, &used);
 
-    /* 4. Proven-safe Adreno 830 Vulkan & Oryon v2 worker thread scaling. */
-    count += totk_s25_set_default("TOTK_VK_DESC_STOCK", "1", applied, sizeof applied, &used);
+    /* 3. Adreno 830 Vulkan defaults tuned for long-session VMA/RAM stability:
+     *    - Keep TOTK_VK_DESC_STOCK off (upstream default) so descriptor pools release VMAs/RAM.
+     *    - Use 2 upload + 2 compile threads to limit peak memory/VMA bursts on 12 GB + DeX.
+     *    - Enable TOTK_VK_NAN_MINMAX=1 by default to fix fire/wind white-box NaN artifacts. */
+    count += totk_s25_set_default("TOTK_VK_NAN_MINMAX", "1", applied, sizeof applied, &used);
     count += totk_s25_set_default("TOTK_VK_UPLOAD_THREADS", "2", applied, sizeof applied, &used);
-    count += totk_s25_set_default("TOTK_VK_COMPILE_THREADS", "4", applied, sizeof applied, &used);
+    count += totk_s25_set_default("TOTK_VK_COMPILE_THREADS", "2", applied, sizeof applied, &used);
     if (!fg) {
         count += totk_s25_set_default("TOTK_VK_SPLIT_PASS_DRAWS", "512", applied, sizeof applied, &used);
     }

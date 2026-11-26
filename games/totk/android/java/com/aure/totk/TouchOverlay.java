@@ -148,7 +148,7 @@ final class TouchOverlay {
         pillParams.y = Math.round(18 * dp);
 
         // Respect TOTK_TOUCH_UI=0 (from S25+ Tweaks & QoL) to hide even the UI pill for pure controller/Xreal play.
-        if ("0".equals(System.getenv("TOTK_TOUCH_UI"))) {
+        if ("0".equals(readEnvKey(activity, "TOTK_TOUCH_UI"))) {
             destroyed = true;
             return;
         }
@@ -580,8 +580,14 @@ final class TouchOverlay {
                 Control c = controls.get(i);
                 if (!includeHidden && !c.visible) continue;
                 float cx = c.x * w, cy = c.y * h;
-                float hw = halfW(c) * 1.12f, hh = halfH(c) * 1.12f;
-                if (Math.abs(px - cx) <= hw && Math.abs(py - cy) <= hh) return c;
+                if (c.stick >= 0) {
+                    float r = baseRadius(c) * 1.30f;
+                    float dx = px - cx, dy = py - cy;
+                    if (dx * dx + dy * dy <= r * r) return c;
+                } else {
+                    float hw = halfW(c) * 1.12f, hh = halfH(c) * 1.12f;
+                    if (Math.abs(px - cx) <= hw && Math.abs(py - cy) <= hh) return c;
+                }
             }
             return null;
         }
@@ -713,6 +719,7 @@ final class TouchOverlay {
                     float px = ev.getX(idx), py = ev.getY(idx);
                     Control hit = hitTest(px, py, false);
                     if (hit == null) return activePointers.size() > 0;
+                    if (getParent() != null) getParent().requestDisallowInterceptTouchEvent(true);
                     activePointers.put(pid, hit);
                     if (hit.bit >= 0) {
                         hit.pressed = true;
@@ -773,8 +780,25 @@ final class TouchOverlay {
             if (len > 1f) { dx /= len; dy /= len; }
             c.knobX = dx;
             c.knobY = dy;
-            TotkActivity.nativeTouchStick(c.stick, dx, dy);
+            try { TotkActivity.nativeTouchStick(c.stick, dx, dy); } catch (Throwable ignored) {}
         }
+    }
+
+    private static String readEnvKey(Activity activity, String key) {
+        try {
+            File env = new File(activity.getFilesDir(), "game/totk.env");
+            if (env.isFile()) {
+                for (String raw : java.nio.file.Files.readAllLines(env.toPath(), StandardCharsets.UTF_8)) {
+                    String line = raw.trim();
+                    if (line.isEmpty() || line.startsWith("#")) continue;
+                    int eq = line.indexOf('=');
+                    if (eq > 0 && key.equals(line.substring(0, eq).trim())) {
+                        return line.substring(eq + 1).trim();
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+        return System.getenv(key);
     }
 
     private static float clamp(float v, float lo, float hi) { return Math.max(lo, Math.min(hi, v)); }

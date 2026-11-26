@@ -44,8 +44,16 @@ final class S25Tweaks {
 
         List<Entry> entries = new ArrayList<>();
         entries.add(new Entry("TOTK_S25_PROFILE", "S25+ Auto-Tuner",
-                "API 37 ADPF + Adreno 830 Vulkan + Oryon v2 threading",
+                "API 37 ADPF + Adreno 830 Vulkan + VMA-safe 2-thread shader compile",
                 new String[]{"On (Default)", "Off (Stock)"},
+                new String[]{"", "0"}));
+        entries.add(new Entry("TOTK_VK_NAN_MINMAX", "Wind / Fire White-Box Fix",
+                "Rewrites shader FMin/FMax/FClamp to NMin/NMax/NClamp (fixes fire updraft white boxes)",
+                new String[]{"On (S25+ Default)", "Off"},
+                new String[]{"", "0"}));
+        entries.add(new Entry("TOTK_KEEP_RUNNING_UNFOCUSED", "Keep Running on Notifications / Volume / DeX",
+                "Prevents freezing when pulling down notifications, changing volume, or clicking outside DeX window",
+                new String[]{"On (Default)", "Off (Pause on Focus Loss)"},
                 new String[]{"", "0"}));
         entries.add(new Entry("TOTK_ASPECT", "Screen Aspect Ratio",
                 "Fill the Galaxy S25+ display without side black bars",
@@ -56,13 +64,13 @@ final class S25Tweaks {
                 new String[]{"Off", "On"},
                 new String[]{"", "1"}));
         entries.add(new Entry("TOTK_SHADOW_CASCADES", "Shadow Cascades",
-                "Fewer cascades = big CPU & GPU boost in Lookout Landing / Korok Forest",
-                new String[]{"3 (S25+ Default)", "2 (Max FPS)", "4 (Game Full)"},
-                new String[]{"", "2", "0"}));
+                "Game Full avoids shrine shadow flicker; 3 or 2 trades shadow stability for extra FPS",
+                new String[]{"Game Full (Default)", "3", "2 (Max FPS)"},
+                new String[]{"", "3", "2"}));
         entries.add(new Entry("TOTK_POINT_SHADOWS", "Point-Light Shadows",
-                "Cap dynamic point-light shadow casters",
-                new String[]{"2 (S25+ Default)", "1 (Max FPS)", "Game Full"},
-                new String[]{"", "1", "64"}));
+                "Game Full avoids shadow flicker; lower values cap dynamic point-light shadow casters",
+                new String[]{"Game Full (Default)", "2", "1 (Max FPS)"},
+                new String[]{"", "2", "1"}));
         entries.add(new Entry("TOTK_FAR_CLAMP", "Draw Distance Clamp",
                 "Trim far render camera distance (gameplay & physics unchanged)",
                 new String[]{"Default (Full)", "1500m", "1000m (Fast)", "750m (Max FPS)"},
@@ -79,10 +87,10 @@ final class S25Tweaks {
                 "Show draggable UI pill in-game (tap pill to hide/show buttons; Off hides even the pill)",
                 new String[]{"On (Show UI Pill)", "Off (Hide Completely)"},
                 new String[]{"", "0"}));
-        entries.add(new Entry("TOTK_DSU_GYRO", "Joycon2Android DSU Gyro",
-                "Read Switch 2 Pro Controller gyro from 127.0.0.1:26760 automatically",
-                new String[]{"Auto (On)", "Off"},
-                new String[]{"", "0"}));
+        entries.add(new Entry("TOTK_GYRO_SOURCE", "Gyro Motion Source (Eden DSU)",
+                "Auto: Switch 2 controller via Joycon2Android (127.0.0.1:26760), falls back to phone gyro",
+                new String[]{"Auto (DSU -> Phone)", "DSU Controller Only", "Phone Gyro Only"},
+                new String[]{"", "dsu", "phone"}));
 
         for (Entry e : entries) {
             String cur = existing.getOrDefault(e.key, "");
@@ -151,6 +159,39 @@ final class S25Tweaks {
             rlp.topMargin = Math.round(8 * dp);
             list.addView(row, rlp);
         }
+
+        TextView testBtn = new TextView(activity);
+        testBtn.setText("Test Joycon2Android DSU Gyro (127.0.0.1:26760)");
+        testBtn.setTextColor(Color.WHITE);
+        testBtn.setTextSize(13.5f);
+        testBtn.setTypeface(Typeface.DEFAULT_BOLD);
+        testBtn.setGravity(Gravity.CENTER);
+        int tp = Math.round(11 * dp);
+        testBtn.setPadding(tp, tp, tp, tp);
+        GradientDrawable tbg = new GradientDrawable();
+        tbg.setColor(0xFF1F6FEB);
+        tbg.setCornerRadius(10 * dp);
+        testBtn.setBackground(tbg);
+        LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT);
+        tlp.topMargin = Math.round(12 * dp);
+        testBtn.setOnClickListener(v -> {
+            testBtn.setText("Testing 127.0.0.1:26760...");
+            new Thread(() -> {
+                String res = com.aure.totk.DsuMotionClient.probeOnce(
+                        com.aure.totk.DsuMotionClient.DEFAULT_HOST,
+                        com.aure.totk.DsuMotionClient.DEFAULT_PORT);
+                activity.runOnUiThread(() -> {
+                    testBtn.setText("Test Joycon2Android DSU Gyro (127.0.0.1:26760)");
+                    new AlertDialog.Builder(activity, android.R.style.Theme_DeviceDefault_Dialog_Alert)
+                            .setTitle("DSU Gyro Test Result")
+                            .setMessage(res)
+                            .setPositiveButton("OK", null)
+                            .show();
+                });
+            }, "totk-dsu-probe").start();
+        });
+        list.addView(testBtn, tlp);
 
         new AlertDialog.Builder(activity, android.R.style.Theme_DeviceDefault_Dialog_Alert)
                 .setTitle("S25+ Tweaks & QoL (totk.env)")

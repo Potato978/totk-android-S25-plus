@@ -73,6 +73,22 @@ public final class TotkActivity extends NativeActivity {
             }
         } catch (Throwable ignored) {}
     }
+    private boolean keepRunningUnfocused() {
+        try {
+            java.io.File env = new java.io.File(getFilesDir(), "game/totk.env");
+            if (env.isFile()) {
+                for (String raw : java.nio.file.Files.readAllLines(env.toPath(), StandardCharsets.UTF_8)) {
+                    String line = raw.trim();
+                    if (line.isEmpty() || line.startsWith("#")) continue;
+                    int eq = line.indexOf('=');
+                    if (eq > 0 && "TOTK_KEEP_RUNNING_UNFOCUSED".equals(line.substring(0, eq).trim())) {
+                        return !"0".equals(line.substring(eq + 1).trim());
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+        return !"0".equals(System.getenv("TOTK_KEEP_RUNNING_UNFOCUSED"));
+    }
     private void setAndroidGameState(boolean active) {
         if (Build.VERSION.SDK_INT < 33) return;
         try {
@@ -216,12 +232,14 @@ public final class TotkActivity extends NativeActivity {
         super.onConfigurationChanged(config);
         // Moving a task with the menu on top must not bring its background game back over the menu.
         if (resumed) ensureMainDisplay();
+        if (resumed && !updateOpen && keepRunningUnfocused()) nativeGameFocus(true, false);
         if (companion != null && getDisplay() != null) companion.onDisplayChanged(getDisplay().getDisplayId());
     }
     @Override protected void onResume() {
         super.onResume();
         resumed = true;
         ensureMainDisplay();
+        if (!updateOpen && keepRunningUnfocused()) nativeGameFocus(true, false);
         GameFeedback f = feedback;
         if (f != null) f.resume();
         setAndroidGameState(true);
@@ -234,9 +252,12 @@ public final class TotkActivity extends NativeActivity {
     }
     @Override public void onWindowFocusChanged(boolean focused) {
         super.onWindowFocusChanged(focused);
-        // Quickstep can leave the live recents tile RESUMED. On one display,
-        // focus loss must pause too, and focus return need not call onResume.
-        // Never apply that policy to multi-resume on a second display.
+        // Keep running across transient focus losses (notifications, volume slider, DeX taskbar/windows)
+        // when TOTK_KEEP_RUNNING_UNFOCUSED is enabled (default on S25+); full app switches still pause via onPause().
+        if (!updateOpen && keepRunningUnfocused()) {
+            nativeGameFocus(true, false);
+            return;
+        }
         boolean single = PresentationController.secondScreen(this, getDisplay()) == DisplayClass.NONE;
         nativeGameFocus(focused && !updateOpen, single || updateOpen);
         GameFeedback f = feedback;

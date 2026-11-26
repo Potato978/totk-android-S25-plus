@@ -1756,7 +1756,7 @@ enum { SW_A = 0, SW_B, SW_X, SW_Y, SW_LS, SW_RS, SW_L, SW_R, SW_ZL, SW_ZR, SW_PL
 static pthread_mutex_t g_pad_mu = PTHREAD_MUTEX_INITIALIZER;
 static uint64_t g_keys, g_hat, g_trig, g_edges;   /* buttons from key events, from the hat axes, from trigger axes; presses since the last read */
 static uint64_t g_touch_keys, g_touch_edges;      /* on-screen customizable touch UI buttons */
-static float g_touch_axes[4];                     /* on-screen virtual analog sticks (lx, ly, rx, ry) */
+static int32_t g_touch_axes[4];                   /* on-screen virtual analog sticks (-32767..+32767) */
 static int32_t g_axes[4];
 static int g_pad_seen;
 static overlay_chord g_chord;   /* Minus + R live overlay shortcut (overlay_chord.h); under g_pad_mu */
@@ -1871,15 +1871,34 @@ void runtime_android_touch_button(JNIEnv *env, jclass cls, jlong mask, jboolean 
     else g_touch_keys &= ~m;
     pthread_mutex_unlock(&g_pad_mu);
 }
-void runtime_android_touch_stick(JNIEnv *env, jclass cls, jint stick, jfloat x, jfloat y) {
+static int32_t touch_stick_axis(float v) {
+    const float dz = 0.05f;
+    float m = v < 0 ? -v : v;
+    if (m <= dz) return 0;
+    if (m > 1.0f) m = 1.0f;
+    int32_t r = (int32_t)((m - dz) / (1.0f - dz) * 32767.0f);
+    return v < 0 ? -r : r;
+}
+static int32_t stronger_axis(int32_t a, int32_t b) {
+    int32_t aa = a < 0 ? -a : a, bb = b < 0 ? -b : b;
+    return bb > aa ? b : a;
+}
+static int g_touch_stick_logged;
+void runtime_android_touch_stick(JNIEnv *env, jclass cls, jint which, jfloat x, jfloat y) {
     (void)env; (void)cls;
-    if (stick != 0 && stick != 1) return;
+    if (which != 0 && which != 1) return;
     if (x < -1.0f) x = -1.0f; else if (x > 1.0f) x = 1.0f;
     if (y < -1.0f) y = -1.0f; else if (y > 1.0f) y = 1.0f;
+    int32_t sx = touch_stick_axis(x);
+    int32_t sy = -touch_stick_axis(y);   /* Android screen +y is down; Switch +y is up */
     pthread_mutex_lock(&g_pad_mu);
     g_pad_seen = 1;
-    g_touch_axes[stick * 2] = x;
-    g_touch_axes[stick * 2 + 1] = y;
+    g_touch_axes[which * 2] = sx;
+    g_touch_axes[which * 2 + 1] = sy;
+    if (!g_touch_stick_logged && (sx != 0 || sy != 0)) {
+        g_touch_stick_logged = 1;
+        fprintf(stderr, "[totk-touch] virtual stick %d active (%d, %d)\n", (int)which, (int)sx, (int)sy);
+    }
     pthread_mutex_unlock(&g_pad_mu);
 }
 
@@ -1897,10 +1916,10 @@ void runtime_gamepad_read(RuntimeGamepadState *out) {
     if (timed && chord_log())   /* rare (once per lone Minus); the diagnostic accepts printing under the pad lock */
         fprintf(stderr, "[chord] pad read: %s\n", timed & OVERLAY_CHORD_MINUS_DOWN ? "deliver late: 150 ms passed without R" : "tap replay ends (minus released)");
     out->buttons = g_keys | g_hat | g_trig | g_edges | g_touch_keys | g_touch_edges; g_edges = 0; g_touch_edges = 0;
-    out->lx = g_touch_axes[0] != 0.0f ? g_touch_axes[0] : g_axes[0];
-    out->ly = g_touch_axes[1] != 0.0f ? g_touch_axes[1] : g_axes[1];
-    out->rx = g_touch_axes[2] != 0.0f ? g_touch_axes[2] : g_axes[2];
-    out->ry = g_touch_axes[3] != 0.0f ? g_touch_axes[3] : g_axes[3];
+    out->lx = stronger_axis(g_axes[0], g_touch_axes[0]);
+    out->ly = stronger_axis(g_axes[1], g_touch_axes[1]);
+    out->rx = stronger_axis(g_axes[2], g_touch_axes[2]);
+    out->ry = stronger_axis(g_axes[3], g_touch_axes[3]);
     out->connected = g_pad_seen;
     pthread_mutex_unlock(&g_pad_mu);
 }
