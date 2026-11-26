@@ -116,6 +116,24 @@ final class GameFeedback implements SensorEventListener, InputManager.InputDevic
         }
     }
 
+    private String readGyroSource() {
+        try {
+            java.io.File env = new java.io.File(activity.getFilesDir(), "game/totk.env");
+            if (env.isFile()) {
+                for (String raw : java.nio.file.Files.readAllLines(env.toPath(), java.nio.charset.StandardCharsets.UTF_8)) {
+                    String line = raw.trim();
+                    if (line.isEmpty() || line.startsWith("#")) continue;
+                    int eq = line.indexOf('=');
+                    if (eq > 0 && "TOTK_GYRO_SOURCE".equals(line.substring(0, eq).trim())) {
+                        return line.substring(eq + 1).trim().toLowerCase(java.util.Locale.ROOT);
+                    }
+                }
+            }
+        } catch (Throwable ignored) {}
+        String v = System.getenv("TOTK_GYRO_SOURCE");
+        return v == null ? "" : v.trim().toLowerCase(java.util.Locale.ROOT);
+    }
+
     /** Handler thread: the controller or device that serves each feature now. */
     private void choose() {
         Vibrator[] pad = null; String padName = null, sensorName = null; SensorManager padSensors = null;
