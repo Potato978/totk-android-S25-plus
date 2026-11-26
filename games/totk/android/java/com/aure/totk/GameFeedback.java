@@ -89,7 +89,7 @@ final class GameFeedback implements SensorEventListener, InputManager.InputDevic
     }
     void resume() { handler.post(() -> { resumed = true; choose(); }); }
     void pause() {
-        handler.post(() -> { resumed = false; stopSensors(); });
+        handler.post(() -> { resumed = false; dsu.stop(); stopSensors(); });
         rumble(0, 0);
     }
     void close() {
@@ -148,10 +148,14 @@ final class GameFeedback implements SensorEventListener, InputManager.InputDevic
             quarterTurns = display == null ? 0 : display.getRotation();
             SensorManager source = padSensors != null ? padSensors : activity.getSystemService(SensorManager.class);
             String name = padSensors != null ? sensorName : "this device";
+            String gyroSrc = readGyroSource();
+            boolean useDsu = !"phone".equals(gyroSrc);
+            boolean useLocal = !"dsu".equals(gyroSrc);
             if (!resumed) { dsu.stop(); stopSensors(); }
             else {
-                if (!"0".equals(System.getenv("TOTK_DSU_GYRO"))) dsu.start();
-                if (sensors == null || !name.equals(sensorSource)) { stopSensors(); startSensors(source, padSensors != null, name); }
+                if (useDsu) dsu.start(); else dsu.stop();
+                if (!useLocal) stopSensors();
+                else if (sensors == null || !name.equals(sensorSource)) { stopSensors(); startSensors(source, padSensors != null, name); }
             }
         }
     }
