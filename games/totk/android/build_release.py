@@ -68,7 +68,7 @@ def parse_args(argv):
     ap.add_argument('--version-code', type=int, help='default: from the version name, MAJOR*10000 + MINOR*100 + PATCH')
     ap.add_argument('--version-name', help=f'default: {APP_VERSION}')
     ap.add_argument('--jobs', type=int, default=os.cpu_count() or 4)
-    ap.add_argument('--s25-opt', action='store_true', help='compile libtotk.so with -O3, ThinLTO, and Oryon v2 ARMv8.6-A flags')
+    ap.add_argument('--s25-opt', action='store_true', help='compile libtotk.so with -O3, ThinLTO, and Oryon v2 ARMv8.4-A flags')
     args = ap.parse_args(argv)
     if not args.audit:
         missing = [n for n in ('ndk', 'turnip', 'key') if not getattr(args, n)]

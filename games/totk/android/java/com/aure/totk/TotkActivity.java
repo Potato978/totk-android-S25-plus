@@ -3,6 +3,7 @@ package com.aure.totk;
 import android.app.GameManager;
 import android.app.GameState;
 import android.app.NativeActivity;
+import android.view.WindowManager;
 import android.content.Intent;
 import android.content.res.Configuration;
 import android.os.Build;
@@ -11,7 +12,6 @@ import android.util.Log;
 import android.view.AttachedSurfaceControl;
 import android.view.Display;
 import android.view.View;
-import android.view.WindowManager;
 import com.aure.totk.companion.AssetStore;
 import com.aure.totk.companion.CompanionNative;
 import com.aure.totk.companion.DisplayClass;
@@ -32,10 +32,11 @@ public final class TotkActivity extends NativeActivity {
     private long presentEpoch;
     private boolean displayMoveRequested;
     private static boolean updateChecked;
-    private boolean updateOpen;
+    private boolean updateOpen, exitNoticeOpen;
+    private final ExitNotice exitNotice = new ExitNotice();
     private String updateVersion;
     private void showUpdate() {
-        if (!resumed || updateVersion == null || updateOpen || isFinishing()) return;
+        if (!resumed || updateVersion == null || updateOpen || exitNoticeOpen || isFinishing()) return;
         String version = updateVersion;
         updateVersion = null;
         updateOpen = true;
@@ -51,6 +52,7 @@ public final class TotkActivity extends NativeActivity {
             }
             boolean single = PresentationController.secondScreen(this, getDisplay()) == DisplayClass.NONE;
             nativeGameFocus(hasWindowFocus(), single);
+            checkExitNotice();
         });
     }
     private static native void nativePresentTransformHint(long epoch, int hint);
@@ -59,20 +61,6 @@ public final class TotkActivity extends NativeActivity {
     private static native void nativeGameInputFocus(boolean top);
     static native void nativeTouchButton(long mask, boolean down);
     static native void nativeTouchStick(int stick, float x, float y);
-    private void mirrorLogToExternal() {
-        try {
-            java.io.File src = new java.io.File(getFilesDir(), "game/totk.log");
-            java.io.File ext = getExternalFilesDir(null);
-            if (!src.isFile() || ext == null) return;
-            java.io.File dst = new java.io.File(ext, "totk-last.log");
-            try (java.io.FileInputStream in = new java.io.FileInputStream(src);
-                 java.io.FileOutputStream out = new java.io.FileOutputStream(dst)) {
-                byte[] buf = new byte[16384];
-                int n;
-                while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
-            }
-        } catch (Throwable ignored) {}
-    }
     private boolean keepRunningUnfocused() {
         try {
             java.io.File env = new java.io.File(getFilesDir(), "game/totk.env");
@@ -88,6 +76,19 @@ public final class TotkActivity extends NativeActivity {
             }
         } catch (Throwable ignored) {}
         return !"0".equals(System.getenv("TOTK_KEEP_RUNNING_UNFOCUSED"));
+    }
+    private void mirrorLogToExternal() {
+        try {
+            java.io.File src = new java.io.File(getFilesDir(), "game/totk.log");
+            java.io.File ext = getExternalFilesDir(null);
+            if (!src.isFile() || ext == null) return;
+            java.io.File dst = new java.io.File(ext, "totk-last.log");
+            try (java.io.FileInputStream in = new java.io.FileInputStream(src);
+                 java.io.FileOutputStream out = new java.io.FileOutputStream(dst)) {
+                byte[] buf = new byte[16384]; int n;
+                while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            }
+        } catch (Throwable ignored) {}
     }
     private void setAndroidGameState(boolean active) {
         if (Build.VERSION.SDK_INT < 33) return;
@@ -109,7 +110,6 @@ public final class TotkActivity extends NativeActivity {
     /** runtime/game_error.h, on the failing native thread just before the process aborts (Vulkan device lost): open the
      * menu (process ":setup", which survives this one) with the reason instead of leaving the player on the home screen. */
     public void showGameError(String reason) {
-        mirrorLogToExternal();
         try {
             startActivity(new Intent().setClassName(this, "com.aure.totk.setup.SetupActivity")
                     .putExtra(SetupActivity.EXTRA_GAME_ERROR, reason));
@@ -187,14 +187,18 @@ public final class TotkActivity extends NativeActivity {
             nativePresentTransformHint(epoch, -1);
         }
     }
+    /** Native-only session proof/events; START and PAUSE enqueue without IO or waits. */
+    public static void gameSessionEvent(int event, byte[] log, byte[] data) { ExitNotice.nativeEvent(event, log, data); }
     @Override protected void onCreate(Bundle state) {
+        ExitNotice.attach(this);
         super.onCreate(state);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         // NativeActivity synchronously loads totk.env in ANativeActivity_onCreate.
         // Query only after super, before constructing a controller or display listener.
         // The companion art is generated on the device by the optional setup stage; without it the companion stays off.
         if (CompanionNative.isEnabled() && AssetStore.available(this)) companion = new PresentationController(this, new CompanionNative());
+        GameHold.initialize(); // CompanionNative above has associated libtotk with this JVM; never called by an empty service.
         saves = SaveMirror.Watcher.start(this);
+        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
         int given = nativeFeedbackEnabled();   // what start_game gave the game (TOTK_RUMBLE / TOTK_GYRO and the hardware)
         if (given != 0 && !isFinishing()) feedback = new GameFeedback(this, given);
         if (!isFinishing()) { try { touchOverlay = new TouchOverlay(this); } catch (Throwable t) { Log.e("TotkGame", "TouchOverlay init failed", t); } }
@@ -232,18 +236,29 @@ public final class TotkActivity extends NativeActivity {
         super.onConfigurationChanged(config);
         // Moving a task with the menu on top must not bring its background game back over the menu.
         if (resumed) ensureMainDisplay();
-        if (resumed && !updateOpen && keepRunningUnfocused()) nativeGameFocus(true, false);
+        if (resumed && !updateOpen && !exitNoticeOpen && keepRunningUnfocused()) nativeGameFocus(true, false);
         if (companion != null && getDisplay() != null) companion.onDisplayChanged(getDisplay().getDisplayId());
     }
     @Override protected void onResume() {
         super.onResume();
         resumed = true;
+        GameHold.resumed();
+        checkExitNotice();
         ensureMainDisplay();
-        if (!updateOpen && keepRunningUnfocused()) nativeGameFocus(true, false);
+        if (!updateOpen && !exitNoticeOpen && keepRunningUnfocused()) nativeGameFocus(true, false);
         GameFeedback f = feedback;
         if (f != null) f.resume();
         setAndroidGameState(true);
         showUpdate();
+    }
+    private void checkExitNotice() {
+        exitNotice.resume(this, () -> resumed && !updateOpen, open -> {
+            exitNoticeOpen = open;
+            boolean single = PresentationController.secondScreen(this, getDisplay()) == DisplayClass.NONE;
+            nativeGameFocus(hasWindowFocus() && !updateOpen && !open, single || updateOpen || open);
+            GameHold.updatePause();
+            if (!open) showUpdate();
+        });
     }
     @Override public void onTopResumedActivityChanged(boolean top) {
         super.onTopResumedActivityChanged(top);
@@ -252,14 +267,17 @@ public final class TotkActivity extends NativeActivity {
     }
     @Override public void onWindowFocusChanged(boolean focused) {
         super.onWindowFocusChanged(focused);
-        // Keep running across transient focus losses (notifications, volume slider, DeX taskbar/windows)
-        // when TOTK_KEEP_RUNNING_UNFOCUSED is enabled (default on S25+); full app switches still pause via onPause().
-        if (!updateOpen && keepRunningUnfocused()) {
+        // Quickstep can leave the live recents tile RESUMED. On one display,
+        // focus loss must pause too, and focus return need not call onResume.
+        // Never apply that policy to multi-resume on a second display.
+        if (!updateOpen && !exitNoticeOpen && keepRunningUnfocused()) {
             nativeGameFocus(true, false);
+            GameHold.updatePause();
             return;
         }
         boolean single = PresentationController.secondScreen(this, getDisplay()) == DisplayClass.NONE;
-        nativeGameFocus(focused && !updateOpen, single || updateOpen);
+        nativeGameFocus(focused && !updateOpen && !exitNoticeOpen, single || updateOpen || exitNoticeOpen);
+        GameHold.updatePause();
         GameFeedback f = feedback;
         if (single && f != null) {
             if (focused && resumed) f.resume();
@@ -268,12 +286,14 @@ public final class TotkActivity extends NativeActivity {
     }
     @Override protected void onPause() {
         resumed = false;
-        GameFeedback f = feedback;
+        exitNotice.pause();
         setAndroidGameState(false);
         mirrorLogToExternal();
         if (touchOverlay != null) touchOverlay.onPause();
+        GameFeedback f = feedback;
         if (f != null) f.pause();   // no motion in the background, and no motor left running
         super.onPause();
+        GameHold.paused(this);
     }
     @Override protected void onStop() {
         // Leaving the foreground may be the last chance before the process is killed: push a save made just now.
@@ -281,6 +301,8 @@ public final class TotkActivity extends NativeActivity {
         super.onStop();
     }
     @Override protected void onDestroy() {
+        exitNotice.pause();
+        GameHold.destroyed();
         updatePresentPrerotate(0);
         if (companion != null) { companion.close(); companion = null; }
         if (saves != null) { saves.close(1500); saves = null; }

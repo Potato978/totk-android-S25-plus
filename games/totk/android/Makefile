@@ -139,7 +139,7 @@ COMMON += $(PROFILE_FLAGS) $(PGO_CFLAGS)
 S25_OPT ?= 0
 ifeq ($(TARGET),android)
   ifeq ($(S25_OPT),1)
-    # Snapdragon 8 Elite (Oryon v2 / ARMv8.6-A) + ThinLTO + -O3 tuning for S25+
+    # Snapdragon 8 Elite (Oryon v2) + ThinLTO + -O3 tuning for S25+
     S25_CFLAGS := -O3 -fno-omit-frame-pointer -march=armv8.4-a+crypto+fp16+dotprod -flto=thin
     S25_LDFLAGS := -flto=thin -Wl,--thinlto-jobs=4 -Wl,-O2
     COMMON += $(S25_CFLAGS)
@@ -198,8 +198,8 @@ $(OUT)/totk-native: $(RUNTIME_O) $(GFX_O)
 	$(CC) -pie -rdynamic $(PGO_LDFLAGS) -o $@ $^ $(OPUS_LIB) $(VPX_LIB) $(PLATFORM_LIBS)
 	@echo "built $@ ($(TARGET), $(VERSION), GPU $(GPU)$(if $(PGO_ID), PGO $(PGO_ID)))"
 
-# libtotk.map: only ANativeActivity_onCreate and the companion's JNI_OnLoad are exported, so the runtime's symbols bind
-# inside the library.
+# libtotk.map exports the NativeActivity/JNI entrypoints and GameHold's exact JNI methods only;
+# the remaining runtime symbols bind inside the library.
 $(OUT)/libtotk.so: $(RUNTIME_O) $(GFX_O) $(TOTK)/android/libtotk.map $(TOTK)/android/Makefile
 	@rm -f $(OBJ)/rt/frontend_android.c.o; $(CC) $(WARN) $(COMMON) -c $(TOTK)/runtime/frontend_android.c -o $(OBJ)/rt/frontend_android.c.o   # the build time in the log is this link's
 	$(CC) -shared $(PGO_LDFLAGS) -Wl,--build-id=sha1 -Wl,--version-script=$(TOTK)/android/libtotk.map -Wl,--no-undefined -Wl,-soname,libtotk.so -o $@ $(RUNTIME_O) $(GFX_O) $(OPUS_LIB) $(VPX_LIB) $(PLATFORM_LIBS) -landroid
@@ -241,6 +241,7 @@ VKTEST_SRC := $(TOTK)/android/gfx/nvn_vk.c $(TOTK)/android/gfx/vk_load.c $(TOTK)
   $(TOTK)/runtime/fps_hybrid_runtime.c $(TOTK)/runtime/fps_adaptive_runtime.c
 VKTEST_SRC += $(TOTK)/android/gfx/vk_framegen_qcom.c $(TOTK)/android/gfx/vk_framegen_lsfg.c
 VKTEST_SRC += $(TOTK)/android/gfx/vk_sections.h $(TOTK)/android/gfx/vk_sections.inc
+VKTEST_SRC += $(TOTK)/third_party/d2r_gfx/gfx/nvn/nvn_map_warn.h
 VKTEST_FLAGS := -O1 -g $(WARN) -Wno-unused-parameter -D_GNU_SOURCE -DGPU_VK -DTOTK_VK_TESTS -I$(TOTK)/runtime -I$(TOTK)/third_party/d2r_gfx/gfx/nvn \
   -I$(TOTK)/third_party/d2r_gfx/gfx/nvn/include $(COMPAT) -fPIE -pie
 VKTEST_LIBS := -ldl -lm $(if $(filter linux,$(TARGET)),-lpthread)

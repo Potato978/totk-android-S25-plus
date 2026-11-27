@@ -129,3 +129,131 @@ static uint32_t *vk_spirv_alpha_test(const uint32_t *w, size_t nw, unsigned func
 bad:
     free(ids); return NULL;
 }
+
+/* Fragment blown-HDR / NaN / Inf killer (TOTK_VK_KILL_BLOWN_FX): wraps the original
+ * fragment entry point, loads Location 0 vec4 float output, and discards (OpKill)
+ * any fragment with NaN, +/-Inf, or (when threshold_bits != 0) any channel > threshold.
+ * Zero extra bindings or descriptor layouts. Returns NULL when Location 0 is not a
+ * float32 vec4 output (caller keeps original module). */
+static uint32_t *vk_spirv_kill_blown_hdr(const uint32_t *w, size_t nw,
+        uint32_t threshold_bits, size_t *out_nw) {
+    if (!w || !out_nw || nw < 5 || w[0] != 0x07230203 || !w[3] || w[3] > (1u << 22)) return NULL;
+    uint32_t bound = w[3], entry = 0, output = 0, vector = 0, function_type = 0, void_type = 0;
+    uint32_t tfloat = 0, tbool = 0, tint = 0;
+    size_t functions = 0;
+    vk_alpha_id *ids = calloc(bound, sizeof *ids);
+    if (!ids) return NULL;
+    for (uint32_t i = 0; i < bound; i++) ids[i].location = UINT32_MAX;
+    for (size_t i = 5; i < nw;) {
+        uint32_t n = w[i] >> 16, op = w[i] & 65535;
+        if (!n || i + n > nw) goto bad;
+        if (op == 15 && n >= 4 && w[i + 1] == 4) { if (entry) goto bad; entry = w[i + 2]; }
+        if (op == 71 && n >= 4 && w[i + 1] < bound) {
+            vk_alpha_id *d = &ids[w[i + 1]];
+            if (w[i + 2] == 30) d->location = w[i + 3];
+            if (w[i + 2] == 31) d->component = w[i + 3];
+            if (w[i + 2] == 32) d->index = w[i + 3];
+        }
+        if (op == 19 && n == 2) void_type = w[i + 1];
+        if (op == 20 && n == 2) tbool = w[i + 1];
+        if (op == 21 && n == 4 && w[i + 2] == 32 && !w[i + 3]) tint = w[i + 1];
+        if (op == 22 && n == 3 && w[i + 2] == 32) tfloat = w[i + 1];
+        if ((op == 21 || op == 22 || op == 23 || op == 28 || op == 32 || op == 33) && n >= 3 && w[i + 1] < bound) {
+            vk_alpha_id *d = &ids[w[i + 1]]; d->op = op; d->a = w[i + 2]; d->b = n > 3 ? w[i + 3] : 0;
+        }
+        if (op == 59 && n >= 4 && w[i + 2] < bound) { ids[w[i + 2]].op = op; ids[w[i + 2]].a = w[i + 1]; ids[w[i + 2]].storage = w[i + 3]; }
+        if (op == 54) { if (!functions) functions = i; if (n >= 5 && w[i + 2] == entry) function_type = w[i + 4]; }
+        i += n;
+    }
+    if (!entry || !functions || !void_type || !function_type || !tfloat) goto bad;
+    uint32_t indices = 0;
+    for (uint32_t i = 1; i < bound; i++) if (ids[i].op == 59 && ids[i].storage == 3 && !ids[i].location && !ids[i].index) {
+        uint32_t type = ids[i].a;
+        if (type >= bound || ids[type].op != 32) continue;
+        type = ids[type].b; indices = 0;
+        while (type < bound && ids[type].op == 28 && indices < 8) { type = ids[type].a; indices++; }
+        if (type >= bound) continue;
+        if (ids[type].op == 23 && ids[type].b == 4 && ids[type].a == tfloat) {
+            vector = type; output = i; break;
+        }
+    }
+    if (!output || !vector) goto bad;
+    uint32_t bvec4 = 0, pout_vec = 0;
+    for (uint32_t i = 1; i < w[3]; i++) {
+        if (tbool && ids[i].op == 23 && ids[i].a == tbool && ids[i].b == 4) bvec4 = i;
+        if (ids[i].op == 32 && ids[i].a == 3 && ids[i].b == vector) pout_vec = i;
+    }
+    int add_bool = !tbool, add_bvec4 = !bvec4, add_pout = (indices > 0 && !pout_vec), add_int = (indices > 0 && !tint);
+    if (add_bool) tbool = bound++;
+    if (add_bvec4) bvec4 = bound++;
+    if (add_pout) pout_vec = bound++;
+    if (add_int) tint = bound++;
+    uint32_t zero_i = indices > 0 ? bound++ : 0;
+    uint32_t thr_f = threshold_bits ? bound++ : 0;
+    uint32_t thr_v = threshold_bits ? bound++ : 0;
+    uint32_t wrapper = bound++, start = bound++, called = bound++;
+    uint32_t ptr = indices > 0 ? bound++ : output;
+    uint32_t val = bound++, vnan = bound++, vinf = bound++, bad1 = bound++;
+    uint32_t vhi = threshold_bits ? bound++ : 0;
+    uint32_t bad2 = threshold_bits ? bound++ : bad1;
+    uint32_t any_bad = bound++, kill = bound++, merge = bound++;
+
+    uint32_t *o = malloc((nw + 192) * sizeof *o);
+    if (!o) goto bad;
+    size_t k = 0;
+#define H(...) do { const uint32_t x[] = {__VA_ARGS__}; memcpy(o + k, x, sizeof x); k += sizeof x / sizeof *x; } while (0)
+    memcpy(o, w, 20); k = 5;
+    for (size_t i = 5; i < nw;) {
+        uint32_t n = w[i] >> 16, op = w[i] & 65535;
+        if (i == functions) {
+            if (add_bool) H(2u << 16 | 20, tbool);
+            if (add_bvec4) H(4u << 16 | 23, bvec4, tbool, 4);
+            if (add_pout) H(4u << 16 | 32, pout_vec, 3, vector);
+            if (add_int) H(4u << 16 | 21, tint, 32, 0);
+            if (indices > 0) H(4u << 16 | 43, tint, zero_i, 0);
+            if (threshold_bits) {
+                H(4u << 16 | 43, tfloat, thr_f, threshold_bits);
+                H(7u << 16 | 44, vector, thr_v, thr_f, thr_f, thr_f, thr_f);
+            }
+        }
+        /* OpKill is incompatible with EarlyFragmentTests (execution mode 9). */
+        if (op == 16 && n >= 3 && w[i + 1] == entry && w[i + 2] == 9) { i += n; continue; }
+        memcpy(o + k, w + i, n * 4);
+        if (op == 15 && n >= 4 && w[i + 2] == entry) o[k + 2] = wrapper;
+        else if ((op == 16 || op == 331) && n >= 3 && w[i + 1] == entry) o[k + 1] = wrapper;
+        k += n;
+        i += n;
+    }
+    H(5u << 16 | 54, void_type, wrapper, 0, function_type);
+    H(2u << 16 | 248, start);
+    H(4u << 16 | 57, void_type, called, entry);
+    if (indices > 0) {
+        o[k++] = ((4 + indices) << 16) | 65; o[k++] = pout_vec; o[k++] = ptr; o[k++] = output;
+        for (uint32_t j = 0; j < indices; j++) o[k++] = zero_i;
+    }
+    H(4u << 16 | 61, vector, val, ptr);
+    H(4u << 16 | 156, bvec4, vnan, val);              /* OpIsNan */
+    H(4u << 16 | 157, bvec4, vinf, val);              /* OpIsInf */
+    H(5u << 16 | 166, bvec4, bad1, vnan, vinf);       /* OpLogicalOr */
+    if (threshold_bits) {
+        H(5u << 16 | 186, bvec4, vhi, val, thr_v);    /* OpFOrdGreaterThan */
+        H(5u << 16 | 166, bvec4, bad2, bad1, vhi);    /* OpLogicalOr */
+    }
+    H(4u << 16 | 154, tbool, any_bad, bad2);          /* OpAny */
+    H(3u << 16 | 247, merge, 0);                      /* OpSelectionMerge */
+    H(4u << 16 | 250, any_bad, kill, merge);          /* OpBranchConditional */
+    H(2u << 16 | 248, kill);
+    H(1u << 16 | 252);                                /* OpKill */
+    H(2u << 16 | 248, merge);
+    H(1u << 16 | 253);                                /* OpReturn */
+    H(1u << 16 | 56);                                 /* OpFunctionEnd */
+    o[3] = bound;
+    *out_nw = k;
+#undef H
+    free(ids);
+    return o;
+bad:
+    free(ids);
+    return NULL;
+}
+

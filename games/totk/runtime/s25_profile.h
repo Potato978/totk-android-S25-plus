@@ -97,6 +97,7 @@ static inline int totk_s25_profile_apply_for(const char *soc, const char *model)
     count += totk_s25_set_default("TOTK_VK_NAN_MINMAX", "1", applied, sizeof applied, &used);
     count += totk_s25_set_default("TOTK_VK_UPLOAD_THREADS", "2", applied, sizeof applied, &used);
     count += totk_s25_set_default("TOTK_VK_COMPILE_THREADS", "2", applied, sizeof applied, &used);
+    count += totk_s25_set_default("TOTK_MAP_WARN", "1", applied, sizeof applied, &used);
     if (!fg) {
         count += totk_s25_set_default("TOTK_VK_SPLIT_PASS_DRAWS", "512", applied, sizeof applied, &used);
     }

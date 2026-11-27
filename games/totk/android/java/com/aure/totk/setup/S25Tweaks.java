@@ -47,6 +47,14 @@ final class S25Tweaks {
                 "API 37 ADPF + Adreno 830 Vulkan + VMA-safe 2-thread shader compile",
                 new String[]{"On (Default)", "Off (Stock)"},
                 new String[]{"", "0"}));
+        entries.add(new Entry("TOTK_VK_KILL_BLOWN_FX", "Kill Glowing White Wind / NaN FX",
+                "Discards 3D pixels outputting NaN/Inf or extreme HDR glow before bloom (fixes glowing white wind/updrafts)",
+                new String[]{"Off", "NaN/Inf Only", "NaN/Inf + Glow > 16 (Rec)", "Aggressive (Glow > 4)"},
+                new String[]{"", "nan", "16", "4"}));
+        entries.add(new Entry("TOTK_WIND_RIBBONS", "White Wind / Updraft Ribbons (Issue #4)",
+                "Fade to 15% opacity or hide the glitched white wind/updraft ribbons",
+                new String[]{"Normal (Default)", "Faint (15% Opacity)", "Hide Wind Ribbons", "Hide All Glitched FX"},
+                new String[]{"", "faint", "hide", "hide_all"}));
         entries.add(new Entry("TOTK_VK_NAN_MINMAX", "Wind / Fire White-Box Fix",
                 "Rewrites shader FMin/FMax/FClamp to NMin/NMax/NClamp (fixes fire updraft white boxes)",
                 new String[]{"On (S25+ Default)", "Off"},

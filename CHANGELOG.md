@@ -6,7 +6,41 @@ the game version it runs is shown separately. versionCode = major × 10000 + min
 ## Unreleased
 
 ### Developer tools
-- Add enabled-only `TOTK_WB_ALIAS=1` path coverage: cumulative operations/bytes by landing, report/event store
+- Log the frozen effective write-back-alias state and map-warning mode once at first presenter startup,
+  including explicit opt-outs, so benchmark tools need not infer build-dependent defaults from menu settings.
+- Record effective alias/warning states from complete startup evidence, including the warning mode, in benchmark
+  signatures and comparison admission. UNKNOWN never matches; missing lines are not silently off. Preserve pinned
+  pre-switch baseline numbers/hashes and require explicit `TOTK_WB_ALIAS=0 TOTK_MAP_WARN=0` for historical controls.
+- Reconcile every positioned benchmark switch-state record inside an independently closed startup bracket.
+  Reject stale, duplicate, malformed and conflicting records per switch before marker or pre-switch-provenance
+  admission; require current evidence metadata so older resolver results cannot bypass UNKNOWN rejection.
+  Preserve window metrics and immutable baseline identities.
+- Make optional frame-timeline and fence-evidence ring producers single-attempt/nonblocking, with counted
+  dropped updates and skipped snapshots. Reuse per-walk elapsed clocks instead of enabling recorder
+  opcode/category probes, and batch recorder-worker draws/descriptors at slot assembly instead of each job.
+  Retain slot/walk/input/presentation evidence and ordinary default-off behavior.
+  Gate the new per-walk/per-assembly accounting bodies before all counter/slot work when disabled;
+  test both probe regions stay unentered with timeline off, including with explicit recorder profiling on.
+  Measured AYN Thor, 30-fps standing, 20-minute launches: walk CPU about 15.7 ms/frame off,
+  20.4 ms old-on (+29.6%), and 15.5 / 15.7 ms new-on (−1.3% / +0.3%, within noise).
+  New-off was −0.4% / −0.8% versus the measured main baseline, within noise; sample loss ≤0.07%
+  of producer-update attempts. Observed intervals ≥60 / ≥80 ms per 20 minutes fell from 20 / 11
+  old-on to 1 / 0 and 4 / 0 new-on. The first run's ordinary >50 ms gate failed (new-on 37 / 63,
+  off 19–37 per 20 minutes), but an eight-launch paired follow-up CLEARED the rewritten diagnostic
+  on this AYN Thor, one Hateno scene, standing only, 30-fps cap: ON 31.43 / 10.10 / 22.44 / 30.30
+  (mean 23.57) versus OFF 21.32 / 39.27 / 33.67 / 35.92 (mean 32.55) per 20 minutes;
+  paired ON-minus-OFF +10.10 / −29.17 / −11.23 / −5.62 and walk-CPU overhead +0.19%.
+  Frozen rule: mean difference ≤10, ON mean ≤1.30×OFF mean, not all pair differences positive,
+  at most one ON value above OFF maximum; all passed. The first run's single high launch is
+  consistent with launch-to-launch variation, not a demonstrated diagnostic effect.
+  It still adds per-frame work when on and remains a diagnostic: prefer OFF for final tail/performance
+  acceptance unless present identically in both arms. Old-on worst-frame figures are suspect and
+  walk CPU about 30% inflated. CPU uses medians of ordinary block means; >50 ms rates use
+  complete-report exposure estimates, unlike exact 20-minute timeline windows. Fixed-order,
+  single-device/scene standing evidence does not establish general tail safety. Measurements are
+  old/main 8bbbce5 versus rewritten 8dc331f, not the integrated head; see DEBUGGING.md and
+  `.scratch/perf/frame-timeline-fix/thor-pairs/report.md` for the follow-up source and limitations.
+- Add enabled-only `TOTK_WB_ALIAS` path coverage (unset or `=1`): cumulative operations/bytes by landing, report/event store
   and publication, separated into alias and fallback reasons at periodic memory reports, Android pause and normal exit.
   Publish pause-report enablement atomically so early Android lifecycle callbacks can race Vulkan initialization safely.
 - Add launch-only, default-off `TOTK_BENCH_TIME=HH:MM` for restored-save benchmark arms.
@@ -33,11 +67,54 @@ the game version it runs is shown separately. versionCode = major × 10000 + min
   policy; game pacing and Android settings remain unchanged.
 
 ### Runtime
+- Follow Link's environment-based map layer, display in-game map coordinates without losing integer-boundary
+  precision, and separate overview/detail caches to stop stationary tile eviction loops. Reject invalid, unreadable
+  or replaced layer samples using the previous layer heuristic; always keep the visible detail tiles plus one, scale
+  only the extra cache margin by Android memory class, and serialize resize decisions. Use plain layer parameters
+  even when their flag bits are clear: the tested Thor surface scene had `01,01,00` and the plain values gave the
+  correct layer; scenes where overrides differ remain untested. Log fallback reason classes at most once per minute.
+  Thanks to @Dorkington ([#47](https://github.com/AurelioB/totk-android/pull/47)).
+  Host regressions cover native layer guards, native JSON → Java coordinates and deterministic cache convergence;
+  surface/sky/Depths transitions, zoom appearance, memory and decoder CPU still need dual-screen device checks.
+- Add experimental, default-off `TOTK_MAP_WARN=1`: count process maps on the existing low-priority
+  sampler about every five seconds, independently of frame lag. Log at 80%; show `MAP LIMIT NEAR` /
+  `SAVE AND RESTART GAME SOON` at 88%, even with the performance overlay off; clear below 84%.
+  Hidden kernel limits use 65,530; unreadable counts clear the notice and log once. Startup-only
+  percentage overrides support safe low-threshold testing. Add diagnostic `TOTK_MAP_WARN=2`
+  per-scan monotonic start/duration/rows and ordinary-frame clock origin; `=1` logging is unchanged.
+  TEST-ONLY `=3` changes thresholds after 12 and 24 warning samples to show, hold and clear the
+  actual notice without adding mappings or restarting. It is not an ordinary-play warning mode.
+  Initial Thor checks observed a readable notice/default-off behavior; device clearing and timing
+  qualification remain unresolved, and the new test modes need device verification.
+  This warns only: it does not fix map growth or change mapping/protection/admission policy.
+- Correct fragment inputs that their vertex shader never writes, targeting wind/air-flow white boxes
+  ([#4](https://github.com/AurelioB/totk-android/issues/4)). Thanks to @Dorkington
+  ([#43](https://github.com/AurelioB/totk-android/pull/43)); keep the credited MIT adaptation.
+  The varying correction is on by default (`TOTK_VK_VARYING_FIX=0` opts out); integer folding and all
+  other module postprocessing still apply. New cache namespaces seed unchanged driver entries from a
+  context-matched predecessor without reusing its prewarm completion bits or changing shader packs.
+  Startup cache-only probes publish hits before play; only misses queue for compilation. Rollback files
+  remain untouched. Worker seed-IO accounting is thread-safe and session logs count patched/fallback
+  shader pairs. The contributor's independent NaN min/max/clamp rewrite is retained as
+  **default-off** `TOTK_VK_NAN_MINMAX=1`, pending separate device qualification. Host checks cannot establish
+  the wind picture, ordinary-scene regressions, prewarm time or frame-time effects on devices.
+  Keep presentation-time varying statistics independent of module creation. Cache-only probes now defer
+  absent/in-flight replacements without IO or a shader-module wait; unrelated interfaces build concurrently.
+  Mandatory synchronous builds can still wait for required driver work; no device latency bound is claimed.
+- Retire cached and deferred texel-buffer views of an owning pool's exact Vulkan buffer before unbacking destroys it,
+  using the existing arena-buffer release mechanism and existing GPU-use wait. Image/storage invalidation is unchanged.
+  Restore guest pages/private aliases under the pool lock before view retirement, so concurrent same-range
+  registration cannot have its new backing overwritten by the old pool's restoration.
+- Pack multi-element direct and frame-generation descriptor writes into fixed Vulkan-typed scratch arrays.
+  Singleton direct writes retain the existing batched path; descriptor hashing and immutable ownership are unchanged.
+- Retry transient image creation/allocation OOM failures after 1–64 submissions, with at most four retry attempts
+  per submission across recorder threads. Permanent unsupported-format/type failures remain failed; retry logs are bounded.
 - Refresh the shared shader list with seven more upstream variants applicable to game 1.4.3
   (`5fb080496ab7`, V rows only). Fresh host translation prepares 25,039 modules instead of 25,032,
   with zero failures and about 430 KiB of additional packed data. Existing shader packs stay valid;
   run a full shader rebuild to receive the added coverage.
-- Add experimental, launch-only `TOTK_WB_ALIAS=1` (default off): use a retained same-backing private CPU mapping
+- Enable launch-only `TOTK_WB_ALIAS` by default when unset (`=1` also enables; `=0` restores the original path):
+  use a retained same-backing private CPU mapping
   for supported dirty-tracked write-back extents and eligible report/event/uniform stores, without temporarily
   making protected guest pages writable. Preserve CPU-write detection, GPU synchronization and zero-on-recommit;
   unsupported backing and contended report/event/uniform publications keep the old path. This closes the
@@ -45,11 +122,25 @@ the game version it runs is shown separately. versionCode = major × 10000 + min
   Off preserves the original path and logs. First AYN Thor device evidence, over five common completed loads:
   texture GPU-unprotect boundaries 0 versus 17,214; whole-process row growth averaged +1,025 versus +4,535/load.
   No switch-attributable picture corruption was observed. Pooled standing frame tails were SAME, but some individual
-  phases had worse tails; this one ordered alias/legacy pair is not a speed proof. Odin and Duo remain untested.
-  Keep the switch default off; it prevents this fragmentation source, not all mapping growth.
+  phases had worse tails; this one ordered alias/legacy pair is not a speed proof. Odin and Duo were untested
+  in that initial campaign. Later Duo combined no-env/opt-out checks passed; Odin's restart quartet remains
+  INCONCLUSIVE because workload admission failed, not accepted as a non-regression or waived qualification.
+  This mitigates this fragmentation source, not all mapping growth. Final device checks are required before landing
+  the default-on change; existing unsupported-backing/registry-contention fallbacks and their diagnostics are unchanged.
 - Correct the experimental private writer's virtual-mapping authority across production MapVirtual replacements,
   including anonymous unmaps and fallback remaps; serialize replacement and invalidation with borrowed writers.
   Watch-slot-exhausted synchronous records keep the original no-token guest-store path rather than bypass ownership.
+- Diagnose interrupted Android game sessions on launcher/title return using matched platform exit history,
+  with a once-only, controller-dismissable recovery notice. Low-memory exits explain possible unsaved
+  progress loss; unknown endings remain unclassified. Updates, normal closes and setup-only exits do not
+  show a game-loss warning. Default on; exact `TOTK_EXIT_NOTICE=0` silences it. No survival guarantee.
+  Receipt/diagnostic IO and cross-process delivery claiming run off the UI thread; native lifecycle only enqueues.
+  Platform summary tokens and exact exit-record identities replace wall-clock ordering. Missing/rotated history
+  or cleared state stays silent; unshown delivery survives activity recreation without duplicate dialogs.
+- Add experimental `TOTK_GAME_HOLD=1`, off by default: our visible Settings menu binds the live game at foreground-client
+  importance and defers its pause-forced pipeline-cache snapshot. Real background and save-safe Close still flush;
+  a kill during deferral can lose new cache entries. The save protocol is unchanged, not kill-proof. Binding lifecycle
+  and the game's pause/1 s/5 s `oom_score_adj` are logged. Host coverage is not Duo survival evidence.
 - Fix shader translation for compute texture gathers with runtime offsets.
   The translator now lowers those offsets before emitting SPIR-V instead of putting runtime values in constants.
   Existing generated shader seeds need replacement to receive the corrected modules.
@@ -70,6 +161,10 @@ the game version it runs is shown separately. versionCode = major × 10000 + min
   (45.20 → 46.04 fps standing; 44.45 → 45.34 fps panning), which is inside the comparison tool's tolerance,
   so it is not counted as confirmed. The AYN Odin 3 showed no frame-rate change;
   adoption remains undecided on the Retroid Pocket Duo.
+- Fill screens larger than the docked 1920×1080 canvas instead of showing it 1:1 inside black bars (e.g. a
+  2400×1504 tablet used 57% of the panel, now 90%). The front buffer keeps the canvas size; the compositor
+  destination (or the copy fallback's blit) is aspect-fitted to the window. Panels no larger than the canvas,
+  such as the Odin's 1920×1080, are unchanged. Thanks to @kestrelshader42 ([#21](https://github.com/AurelioB/totk-android/pull/21)).
 - Keep `totk.log` as the direct primary log, but make its duplicate logcat mirror opt-in (`TOTK_LOGCAT=1`).
   Normal launches no longer start its tail thread or wake logd for every frame log. Crash reports remain enabled.
 - Let the live-control reader sleep when `totk.ctl` is absent, including after unrelated files are created or deleted.
