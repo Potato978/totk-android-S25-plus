@@ -57,7 +57,7 @@ static inline int vk_spirv_io(const uint32_t *w, size_t nw, uint32_t storage, ui
 /* The module with an Output for each Location of `missing` (kind[] its numeric type), stored (0, 0, 0, 1) first thing in
    the entry point; NULL when the module does not have the expected layout or memory runs out (the caller keeps the
    original). Existing scalar, vector and pointer types are reused (SPIR-V forbids duplicates of those). */
-static inline uint32_t *vk_spirv_add_outputs(const uint32_t *w, size_t nw, uint32_t missing, const uint8_t kind[32], size_t *out_n) {
+static inline uint32_t *vk_spirv_add_outputs_w(const uint32_t *w, size_t nw, uint32_t missing, const uint8_t kind[32], uint32_t w_bits, size_t *out_n) {
     if (!w || !kind || !out_n || nw > SIZE_MAX / sizeof *w || !missing || nw < 5 ||
         w[0] != 0x07230203 || !w[3] || w[3] > (1u << 22)) return NULL;
     size_t ep_at = 0, ann_end = 0, fn_at = 0, store_at = 0, entry_end = 0;
@@ -123,7 +123,7 @@ static inline uint32_t *vk_spirv_add_outputs(const uint32_t *w, size_t nw, uint3
         if (!ptr[k]) { ptr[k] = bound++; g[ng++] = 4u << 16 | 32; g[ng++] = ptr[k]; g[ng++] = 3; g[ng++] = vec[k]; }
         uint32_t zero = bound++, one = bound++;
         g[ng++] = 4u << 16 | 43; g[ng++] = scalar[k]; g[ng++] = zero; g[ng++] = 0;
-        g[ng++] = 4u << 16 | 43; g[ng++] = scalar[k]; g[ng++] = one; g[ng++] = 0x3f800000;   /* the bits of 1.0f */
+        g[ng++] = 4u << 16 | 43; g[ng++] = scalar[k]; g[ng++] = one; g[ng++] = w_bits;
         composite[k] = bound++;
         g[ng++] = 7u << 16 | 44; g[ng++] = vec[k]; g[ng++] = composite[k]; g[ng++] = zero; g[ng++] = zero; g[ng++] = zero; g[ng++] = one;
     }
@@ -147,5 +147,8 @@ static inline uint32_t *vk_spirv_add_outputs(const uint32_t *w, size_t nw, uint3
     free(g);
     *out_n = k;
     return o;
+}
+static inline uint32_t *vk_spirv_add_outputs(const uint32_t *w, size_t nw, uint32_t missing, const uint8_t kind[32], size_t *out_n) {
+    return vk_spirv_add_outputs_w(w, nw, missing, kind, 0x3f800000u, out_n);
 }
 #endif
